@@ -1,0 +1,113 @@
+[build-system]
+requires = ["setuptools>=61.0.0", "wheel"]
+build-backend = "setuptools.build_meta"
+requires-python = "3.11" # tested in python 3.11
+
+[project]
+name = "Advanced-Robot-Learning-and-Decision-Making-Programming-Exercise"
+version = "0.0.1"
+classifiers = [
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Education",
+    "Intended Audience :: Science/Research",
+]
+
+dependencies = [
+    "crazyflow==0.0.2",
+    "warp",
+    "array_api_compat",
+    "munch",
+    "scikit-learn==1.6.1",
+    "scikit-optimize==0.10.2",
+    "wandb==0.19.7",
+    "matplotlib",
+    "termcolor",
+    "gpytorch==1.14",
+    "ipython==8.22.0",
+    "nbconvert",
+    "pygame",
+    "pandas",
+    "ruff"]
+
+[project.optional-dependencies]
+gpu = [
+    "jax[cuda]==0.7.0",
+    "torch==2.8.0+cu126",
+]
+test = [
+    "pytest>=8.0.0",
+    "pytest-cov",
+    "pytest-timeout"
+]
+cpu = [
+    "torch==2.6.0+cpu",
+]
+pin = [
+    "jax==0.7.0",
+    "mujoco-mjx==3.3.0",
+    "mujoco==3.3.0"
+]
+
+[tool.setuptools.packages]
+find = {}
+
+[tool.pytest.ini_options]
+python_files = ["test_*.py", "testStudent_*.py", ]
+addopts = [
+    "--ignore=./solution",
+    "--ignore=./exercise"
+]
+
+[tool.ruff]
+# Exclude a variety of commonly ignored directories.
+exclude = [
+    ".git",
+    ".git-rewrite",
+    ".ipynb_checkpoints",
+    ".pyenv",
+    ".pytest_cache",
+    ".pytype",
+    ".ruff_cache",
+    ".venv",
+    ".vscode",
+    "__pypackages__",
+    "_build",
+    "build",
+    "dist",
+    "site-packages",
+    "venv",
+    "docs/conf.py",
+    "build_solution_and_exercise.py",
+    "build_test_definitions.py"
+]
+
+line-length = 100
+indent-width = 4
+target-version = "py38"
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I", "D", "TCH", "ANN"]
+fixable = ["ALL"]
+unfixable = []
+ignore = ["D107", "D102", "D101", "D100",  "D103", "D104", "D105", "ANN401", "ANN202", "ANN201", "ANN001", "ANN204"] # this list should be reduced in the futre
+
+[tool.ruff.lint.isort]
+known-third-party = ["wandb"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.flake8-annotations]
+suppress-dummy-args = true
+suppress-none-returning = true
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = true
+line-ending = "auto"
+docstring-code-format = true
+docstring-code-line-length = "dynamic"

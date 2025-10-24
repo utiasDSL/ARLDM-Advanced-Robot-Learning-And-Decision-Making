@@ -1,0 +1,34 @@
+########## constraint parameters ##########
+constraint:
+
+  z_2: 1.0e+3  # quadratic slack penalty
+  z_1: 1  # linear slack penalty
+
+
+########## cost parameters ##########
+cost:
+  cost_type: 'NONLINEAR_LS'
+  cost_type_e: 'NONLINEAR_LS'
+
+  Q: [10, 10, 20, 0.1, 0.1, 1, 3, 3, 4, 1, 1, 1] 
+  R: [0.1, 0.1, 0.1, 0.1]
+
+
+########## MPC parameters ##########
+solver:
+
+  export_dir: "acados_c_code/MPC/c_generated_code"
+  n_pred: 100            # prediction horizon  # 
+  Ts: 0.05            # sampling time [s]  # 0.002
+
+  nlp_solver_type: 'SQP_RTI'      # 'SQP_RTI'  
+  qp_solver: 'PARTIAL_CONDENSING_HPIPM'
+  hessian_approx: 'GAUSS_NEWTON'
+  integrator_type: 'IRK'
+
+  nlp_solver_max_iter: 100
+  nlp_solver_tol_comp: 0.0001
+  nlp_solver_tol_eq: 0.0001
+  nlp_solver_tol_stat: 0.0001
+  nlp_solver_tol_ineq: 0.0001
+  globalization_fixed_step_length: 1.0

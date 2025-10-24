@@ -1,0 +1,69 @@
+{
+    "name": "ARLDM-Exercise",
+    "build": {
+        "dockerfile": "Dockerfile",
+        "context": ".."
+    },
+    "postStartCommand": "echo 'Development container started!'",
+    "customizations": {
+        "vscode": {
+            "extensions": [
+                "ms-python.python",
+                "ms-python.pylance",
+                "charliermarsh.ruff",
+                "nvidia.nsight-vscode-edition",
+                "ms-azuretools.vscode-docker",
+                "ms-toolsai.jupyter-renderers",
+                "ms-toolsai.jupyter",
+                "ms-toolsai.jupyter-keymap",
+                "be5invis.toml"
+            ],
+            "settings": {
+                "terminal.integrated.showOnStartup": true,
+                "terminal.integrated.defaultProfile.linux": "bash",
+                "python.defaultInterpreterPath": "/home/vscode/venv/bin/python",
+                "notebook.output.textLineLimit": 30,
+                "notebook.output.scrolling": true,
+                "jupyter.kernels.excludePythonEnvironments": [
+                    "/usr/bin/python",
+                    "/usr/bin/python3.10",
+                    "/usr/bin/python3.11",
+                    "/usr/python3.10",
+                    "/usr/python3.11",
+                    "/bin/python3.10",
+                    "/bin/python3.11",
+                    "/bin/python3"
+                ], // hide unrequired python interpreters, so that the right one gets selected for jupyter https://github.com/microsoft/vscode/issues/130946#issuecomment-1899389049
+                "python.testing.pytestEnabled": true, // test framework
+                "python.testing.pytestArgs": [
+                    "--ignore=exercise"
+                ],
+                "python.testing.unittestEnabled": false, // test framework
+                "python.testing.nosetestsEnabled": false, // test framework
+                "editor.codeActionsOnSave": {
+                    "source.fixAll.ruff": "explicit",
+                    "source.organizeImports.ruff": "explicit"
+                },
+                "[python]": {
+                    "editor.defaultFormatter": "charliermarsh.ruff",
+                    "editor.formatOnSave": false,
+                    "editor.ruler": [
+                        100
+                    ]
+                }
+            }
+        }
+    },
+    "containerEnv": {
+        "DISPLAY": "${localEnv:DISPLAY}",
+        "XAUTHORITY": "${localEnv:XAUTHORITY}"
+    },
+    "runArgs": [
+        "--interactive",
+        "--net=host",
+        "--ipc=host",
+        // "--gpus=all", // use only with GPU
+        // "--runtime=nvidia" // use only with GPU
+    ],
+    "remoteUser": "root" // TODO change to vscode and fix
+}

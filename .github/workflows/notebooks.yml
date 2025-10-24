@@ -1,0 +1,10 @@
+name: Notebooks
+on: [ push, pull_request ]
+jobs:
+  ruff:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Check clean notebooks
+        uses: ResearchSoftwareActions/EnsureCleanNotebooksAction@1.1

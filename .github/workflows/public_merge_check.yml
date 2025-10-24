@@ -1,0 +1,103 @@
+name: Public Merge Check
+
+on:
+  workflow_dispatch:
+  
+
+jobs:
+  merge-check:
+    runs-on: ubuntu-latest
+
+    steps:
+      # Check for Merge conflicts
+      - name: Start Merge
+        if: ${{ github.repository == 'utiasDSL/ARLDM-Advanced-Robot-Learning-And-Decision-Making' }}
+        run: |
+          git clone https://x-access-token:${{ secrets.PRIVATE_REPO_ARLDM }}@github.com/utiasDSL/Advanced-Robot-Learning-and-Decision-Making-Programming-Exercises.git
+          cd Advanced-Robot-Learning-and-Decision-Making-Programming-Exercises
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@noreply.github.com"
+
+          git remote add public https://x-access-token:${{ secrets.PRIVATE_REPO_ARLDM }}@github.com/utiasDSL/ARLDM-Advanced-Robot-Learning-And-Decision-Making.git
+          git fetch public ${{ github.ref_name }}
+
+      - name: Pick new commits (since lat repository publish)
+        if: ${{ github.repository == 'utiasDSL/ARLDM-Advanced-Robot-Learning-And-Decision-Making' }}
+        working-directory: Advanced-Robot-Learning-and-Decision-Making-Programming-Exercises
+        run: |
+          LAST=$(git log origin/main..public/${{ github.ref_name }} --grep='Publish repository' --format='%H' | head -n1)
+
+          if [ -n "$LAST" ]; then
+            RANGE="$LAST..public/main"
+          else
+            RANGE="origin/main..public/main"
+          fi
+          if git rev-list --count $RANGE | grep -qv '^0$'; then
+            git cherry-pick $RANGE
+          else
+            echo "Found no new commits for range $RANGE"
+          fi
+
+      - name: Check for conflicts
+        if: ${{ github.repository == 'utiasDSL/ARLDM-Advanced-Robot-Learning-And-Decision-Making' }}
+        working-directory: Advanced-Robot-Learning-and-Decision-Making-Programming-Exercises
+        run: |
+          CONFLICT_FILES=$(git diff --name-only --diff-filter=U)
+          if [ -n "$CONFLICT_FILES" ]; then
+            echo "Conflicts detected in the following files:"
+            echo "$CONFLICT_FILES"
+            for f in $CONFLICT_FILES; do
+              echo "Full conflicts in $f:"
+              awk '
+              /^<{7}/ {in_conflict=1}
+              in_conflict {print}
+              /^>{7}/ {in_conflict=0}
+              ' "$f"
+            done
+            exit 1
+          else
+            echo "No conflicts detected."
+          fi
+
+      # Testing
+      - name: Run pytest (Development)
+        if: ${{ github.repository == 'utiasDSL/ARLDM-Advanced-Robot-Learning-And-Decision-Making' }}
+        working-directory: Advanced-Robot-Learning-and-Decision-Making-Programming-Exercises
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}/Advanced-Robot-Learning-and-Decision-Making-Programming-Exercises:/workspaces/Advanced-Robot-Learning-and-Decision-Making-Programming-Exercises \
+            -w /workspaces/Advanced-Robot-Learning-and-Decision-Making-Programming-Exercises \
+            olivertum/arldm_artemis:12 \
+            bash -c "
+
+              python run_precompute_solutions.py || echo 'Precompute failed, continuing anyways...'
+
+              pytest src/exercise01
+              pytest src/exercise02
+              pytest src/exercise03
+              pytest src/exercise04
+              pytest src/exercise05
+              pytest src/exercise06
+            "
+
+      - name: Run pytest (Application)
+        if: ${{ github.repository == 'utiasDSL/ARLDM-Advanced-Robot-Learning-And-Decision-Making' }}
+        working-directory: Advanced-Robot-Learning-and-Decision-Making-Programming-Exercises
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}/Advanced-Robot-Learning-and-Decision-Making-Programming-Exercises:/workspaces/Advanced-Robot-Learning-and-Decision-Making-Programming-Exercises \
+            -w /workspaces/Advanced-Robot-Learning-and-Decision-Making-Programming-Exercises \
+            olivertum/arldm_artemis:12 \
+            bash -c "
+              set -e
+
+              python build_solution_and_exercise.py || echo 'Build solution and exercise failes, continuing anyways...'
+              
+              PYTHONPATH=/workspaces/Advanced-Robot-Learning-and-Decision-Making-Programming-Exercises/solution/exercise01 pytest solution/exercise01
+              PYTHONPATH=/workspaces/Advanced-Robot-Learning-and-Decision-Making-Programming-Exercises/solution/exercise02 pytest solution/exercise02
+              PYTHONPATH=/workspaces/Advanced-Robot-Learning-and-Decision-Making-Programming-Exercises/solution/exercise03 pytest solution/exercise03
+              PYTHONPATH=/workspaces/Advanced-Robot-Learning-and-Decision-Making-Programming-Exercises/solution/exercise04 pytest solution/exercise04
+              PYTHONPATH=/workspaces/Advanced-Robot-Learning-and-Decision-Making-Programming-Exercises/solution/exercise05 pytest solution/exercise05
+              PYTHONPATH=/workspaces/Advanced-Robot-Learning-and-Decision-Making-Programming-Exercises/solution/exercise06 pytest solution/exercise06
+            "
