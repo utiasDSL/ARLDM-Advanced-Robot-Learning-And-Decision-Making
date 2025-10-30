@@ -1,154 +1,482 @@
-"""GP-MPC controller using Acados for optimization."""
-
-from pathlib import Path
-from typing import List, Optional, Tuple, Union
+import copy
+import logging
+from dataclasses import dataclass, field
+from typing import Any, Tuple
 
 import casadi as cs
 import numpy as np
-import scipy
+import scipy.stats
 import torch
-from acados_template import AcadosModel, AcadosOcp, AcadosOcpSolver
-from exercise05.gp import (
-    GaussianProcess,
-    covSE_vectorized,
-    fit_gp,
-    gpytorch_predict2casadi,
-    infer_gp,
-)
-from exercise05.mpc import MPC
-from exercise05.utils import (
-    discretize_dynamics_rk4,
-    discretize_linear_system,
-    remove_path,
-)
-from gpytorch.settings import fast_pred_samples, fast_pred_var
-from numpy.typing import NDArray
-from sklearn.cluster import KMeans
+from acados_template import AcadosModel, AcadosOcpSolver  # type: ignore
+from exercise05.gp import ResidualGP, ResidualGPConfig, ResidualGPTrainingConfig
+from exercise05.mpc import MPC, MPCConfig, OcpRegistry
+from exercise05.replay_buffer import ReplayBuffer, ReplayBufferConfig
+from exercise05.utils import discretize_dynamics_rk4, recursive_update
 
 
-class GPMPC:
-    """Implements a GP-MPC controller with Acados optimization."""
+@dataclass
+class GPMPCConfig:
+    mpc: MPCConfig = field(default_factory=MPCConfig)
+    gp: ResidualGPConfig = field(default_factory=ResidualGPConfig)
+    gp_train: ResidualGPTrainingConfig = field(default_factory=ResidualGPTrainingConfig)
+    replay_buffer: ReplayBufferConfig = field(default_factory=ReplayBufferConfig)
+    gp_inputs: list = field(
+        default_factory=lambda: [
+            ["thrust"],
+            ["phi", "dphi", "phi_cmd"],
+            ["theta", "dtheta", "theta_cmd"],
+        ]
+    )
+    gp_outputs: list = field(default_factory=lambda: ["acc", "dphi", "dtheta"])
+    prob: float = 0.7  # For constraint tightening
 
-    U_EQ: NDArray = np.array([0.3234, 0, 0, 0])
+
+class GPMPC(MPC):
+    """Gaussian Process Model Predictive Controller (GP-MPC).
+
+    Args:
+        env: The environment object.
+        prior_params (dict): Parameters for the prior model.
+        output_dir: Directory to save outputs.
+        cfg (dict, optional): Configuration dictionary. Defaults to {}.
+        verbosity (str, optional): Logging verbosity level. Defaults to "info".
+        device (str, optional): Device for PyTorch ('cpu' or 'cuda'). Defaults to "cpu".
+        **kwargs: Additional keyword arguments.
+    """
+
+    gpmpc_cfg = GPMPCConfig()
 
     def __init__(
         self,
-        symbolic_model,
-        traj: NDArray,
-        prior_params: dict,
-        horizon: int,
-        q_mpc: List[float],
-        r_mpc: List[float],
-        sparse_gp: bool = False,
-        prob: float = 0.955,
-        max_gp_samples: int = 30,
-        seed: int = 1337,
+        env,
+        output_dir,
+        prior_params: dict = {},
+        cfg={},
+        verbosity: str = "info",
         device: str = "cpu",
-        output_dir: Path = Path("results/temp"),
-        action_space: Optional[dict] = None,
+        **kwargs: Any,
     ):
-        """Initialize the GP-MPC controller.
+        self.logger = logging.getLogger(self.__class__.__name__)
+        log_level = getattr(logging, verbosity.upper(), logging.INFO)
+        self.logger.setLevel(log_level)
+        self.verbosity = verbosity
+
+        recursive_update(self.gpmpc_cfg, cfg)
+
+        super().__init__(
+            env=env,
+            output_dir=output_dir,
+            prior_params=prior_params,
+            cfg=self.gpmpc_cfg.mpc,
+            verbosity=verbosity,
+            **kwargs,
+        )
+
+        self.device = device if torch.cuda.is_available() else "cpu"
+        self.replay_buffer = ReplayBuffer(self.gpmpc_cfg.replay_buffer, verbosity=verbosity)
+
+        self._X_train, self._Y_train = None, None  # Placeholder for initial data to setup GP
+        # Inverse CDF for constraint tightening
+        self.inverse_cdf = scipy.stats.norm.ppf(
+            1 - (1 / self.nx - (self.gpmpc_cfg.prob + 1) / (2 * self.nx))
+        )
+        # Code creation variables
+        self._gpmpc_json_file = str(self._output_dir / "gpmpc_ocp.json")
+        self._gpmpc_json_sim_file = str(self._output_dir / "gpmpc_sim.json")
+        self._gpmpc_code_export_dir = str(self._output_dir / "gpmpc_c_generated_code")
+
+        self.acc_symbolic_fn = self.setup_symbolic_acceleration(self.prior_params)
+
+        # Reset
+        GPMPC.reset(self, full_reset=True)
+
+    def setup_symbolic_acceleration(self, params: dict) -> cs.Function:
+        """Set up symbolic mapping from normalized thrust command to actual thrust.
 
         Args:
-            symbolic_model: The symbolic model for the system.
-            traj (NDArray): Reference trajectory.
-            prior_params (dict): Prior parameters for the model.
-            horizon (int): MPC horizon.
-            q_mpc (List[float]): State cost weights.
-            r_mpc (List[float]): Input cost weights.
-            sparse_gp (bool): Whether to use sparse GP.
-            prob (float): Probability for constraint tightening.
-            max_gp_samples (int): Maximum GP samples for sparse GP.
-            seed (int): Random seed.
-            device (str): Torch device.
-            output_dir (Path): Output directory.
-            action_space (Optional[dict]): Action space constraints (usually the action space of the environment).
+            params (dict): Parameters with keys 'a' and 'b' for linear mapping.
         """
-        self.sparse = sparse_gp
-        self.output_dir = output_dir
-        self.json_file = str(self.output_dir / "gpmpc_acados_ocp_solver.json")
-        if "cuda" in device and not torch.cuda.is_available():
-            device = "cpu"
-        self.device = device
+        T = cs.MX.sym("T_c")
+        T_mapping = params["a"] * T + params["b"]
+        return cs.Function("T_mapping", [T], [T_mapping])
 
-        # Model parameters
-        self.model = symbolic_model
-        if prior_params is None or any(k not in prior_params for k in ("a", "b")):
-            raise ValueError("prior_params must contain keys 'a' and 'b'")
-        self.acc_symbolic_fn = self.setup_symbolic_acceleration(prior_params)
-        self.dt = self.model.dt
-        self.T = horizon
-        assert len(q_mpc) == self.model.nx and len(r_mpc) == self.model.nu
-        self.Q = np.diag(q_mpc)
-        self.R = np.diag(r_mpc)
+    def reset(self, full_reset: bool = False):
+        """Reset the GP-MPC controller.
 
-        # Setup references.
-        self.traj = traj
-        self.ref_action = np.repeat(self.U_EQ[..., None], self.T, axis=1)
-        self.traj_step = 0
-        self.np_random = np.random.default_rng(seed)
+        Args:
+            full_reset (bool): If True, redeploy GP and GP-MPC. If False, only reset the controller state.
+        """
+        super().reset(full_reset=full_reset)
+        if full_reset:
+            self.gpmpc_registry = OcpRegistry(self.T)
+            self.replay_buffer.clear()
+            self._reset_gp()
+            self._reset_gpmpc()
+        else:
+            if self.gpmpc_solver is not None:
+                self.gpmpc_solver.reset()
 
-        # GP and training parameters.
-        self.gp_idx = [[0], [1, 2, 3], [4, 5, 6]]  # State input indices for each GP
-        self.gaussian_process = None
-        self._requires_recompile = False
-        self.gp_state_input = None
-        self.inverse_cdf = scipy.stats.norm.ppf(
-            1 - (1 / self.model.nx - (prob + 1) / (2 * self.model.nx))
+    def _reset_gp(self):
+        self._gp_initialized = False
+        self.gp: ResidualGP = None
+        self.setup_gp(override=True)
+
+    def _reset_gpmpc(self):
+        self._gpmpc_initialized = False
+        self.gpmpc_ocp = None
+        self.gpmpc_solver = None
+        self.setup_gpmpc(override=True)
+
+    def setup_gp(self, X_init=None, Y_init=None, override: bool = False):
+        if X_init is None or Y_init is None:
+            self.logger.debug("Skipping GP setup; no initial data provided.")
+            return
+        if self._gp_initialized and not override:
+            return
+
+        self.gp: ResidualGP = ResidualGP(
+            X_list=X_init,
+            Y_list=Y_init,
+            gp_cfg=self.gpmpc_cfg.gp,
+            train_cfg=self.gpmpc_cfg.gp_train,
+            verbosity=self.verbosity,
         )
-        self.max_gp_samples = max_gp_samples
+        self._X_train, self._Y_train = X_init, Y_init
+        self._gp_initialized = True
+        self.logger.info("GP initialized.")
 
-        uncertain_dim = [1, 3, 5, 9, 10]  # dx, dy, dz, dphi, dtheta
-        self.Bd = np.eye(self.model.nx)[:, uncertain_dim]
+    def setup_gpmpc(self, override: bool = False):
+        if not self._gp_initialized:
+            return
+        if self._gpmpc_initialized and not override:
+            return
 
-        # MPC params
-        prior_ctrl = MPC(
-            symbolic_model,
-            traj=traj,
-            horizon=horizon,
-            q_mpc=q_mpc,
-            r_mpc=r_mpc,
-            output_dir=output_dir,
-            action_space=action_space,
+        # Copy & extend the acados model with GP residual dynamics
+        acados_model: AcadosModel = copy.deepcopy(self.acados_model)
+        acados_model = self._add_residual_dynamics_to_acados_model(acados_model)
+
+        ocp = self.setup_acados_ocp(acados_model, cfg=self.mpc_cfg)
+        ocp.model.name = "gpmpc"
+        ocp.solver_options.integrator_type = "DISCRETE"  # Enforce discrete dynamics
+        ocp.code_export_directory = self._gpmpc_code_export_dir
+
+        self._modify_constraints_for_tightening(acados_model)
+
+        self.gpmpc_registry.build_parameters(ocp)
+        self.gpmpc_registry.build_constraints(ocp)
+
+        # Create the solver
+        self.gpmpc_model = acados_model
+        self.gpmpc_ocp = ocp
+        self.gpmpc_solver = AcadosOcpSolver(ocp, json_file=self._gpmpc_json_file, verbose=False)
+        self._gpmpc_initialized = True
+        self.logger.debug("GPMPC initialized.")
+
+    def _add_residual_dynamics_to_acados_model(self, acados_model: AcadosModel) -> AcadosModel:
+        """Modify the AcadosModel to include GP dynamics. Hardcoded for sparse parameterization."""
+        x = acados_model.x
+        u = acados_model.u
+        z = cs.vertcat(x, u)
+        state_mapping = self.mpc_cfg.state_mapping
+        action_mapping = self.mpc_cfg.action_mapping
+        gp_inputs = self.gpmpc_cfg.gp_inputs
+        gp_outputs = self.gpmpc_cfg.gp_outputs
+        # Extract the individual gp inputs
+        idx_lists = []
+        for input_vars in gp_inputs:
+            idx_list = []
+            for var in input_vars:
+                if var in state_mapping:
+                    idx_list.append(state_mapping[var])
+                elif var in action_mapping:
+                    idx_list.append(self.nx + action_mapping[var])
+                else:
+                    raise ValueError(f"Variable '{var}' not found in state or action mapping.")
+            idx_lists.append(idx_list)
+        Z = [z[idx_list] for idx_list in idx_lists]
+        # Get the residual dynamics expression and required parameters from the GP
+        sym_residual_exprs, sym_gp_params_list = self.gp.get_sparse_parameterization(Z=Z)
+
+        T_pred = sym_residual_exprs[gp_outputs.index("acc")]
+        phi_idx, theta_idx = state_mapping["phi"], state_mapping["theta"]
+        ax_sym = T_pred * (cs.cos(acados_model.x[phi_idx]) * cs.sin(acados_model.x[theta_idx]))
+        ay_sym = T_pred * (-cs.sin(acados_model.x[phi_idx]))
+        az_sym = T_pred * (cs.cos(acados_model.x[phi_idx]) * cs.cos(acados_model.x[theta_idx]))
+
+        # Build full residual vector safely (no in-place MX mutation)
+        residual_list = [cs.MX.zeros(1) for _ in range(self.nx)]
+        residual_list[state_mapping["dx"]] = ax_sym
+        residual_list[state_mapping["dy"]] = ay_sym
+        residual_list[state_mapping["dz"]] = az_sym
+        residual_list[state_mapping["dphi"]] = sym_residual_exprs[gp_outputs.index("dphi")]
+        residual_list[state_mapping["dtheta"]] = sym_residual_exprs[gp_outputs.index("dtheta")]
+        sym_residual_expr = cs.vertcat(*residual_list)
+
+        # Flatten GP parameter symbols
+        sym_gp_params = cs.vertcat(*sym_gp_params_list)
+
+        # Register GP parameters
+        self.gpmpc_registry.add_param(
+            "gp_params",
+            size=int(sym_gp_params.shape[0]),
+            update_fcn=self.gp.update_residual_parameters,
+            overwrite=True,
+            sym=sym_gp_params,
         )
-        self.action_space = action_space
-        self.prior_ctrl = prior_ctrl  # Required for selecting actions with the prior dynamics only
-        x_eq, u_eq = np.zeros(self.model.nx), self.U_EQ
-        dfdx_dfdu = prior_ctrl.model.df_func(x=x_eq, u=u_eq)
-        prior_dfdx, prior_dfdu = dfdx_dfdu["dfdx"].toarray(), dfdx_dfdu["dfdu"].toarray()
-        self.discrete_dfdx, self.discrete_dfdu, self.lqr_gain = self.setup_prior_dynamics(
-            prior_dfdx, prior_dfdu, self.Q, self.R, self.dt
+
+        # Compose new discrete dynamics: x_{k+1} = f_nom(x,u) + residual(x,u)
+        f_cont_nom = self.symbolic_model.fc_func(x, u)
+        f_cont = f_cont_nom + sym_residual_expr
+        f_cont_fun = cs.Function("f_cont_fun", [x, u, sym_gp_params], [f_cont])
+        acados_model.disc_dyn_expr = discretize_dynamics_rk4(
+            f_cont_fun, self.dt, x, u, sym_gp_params, as_function=False
         )
-        self.prior_dynamics: cs.Function = prior_ctrl.model.fc_func
-        assert isinstance(self.prior_dynamics, cs.Function)
-
-        self.acados_solver: Optional[AcadosOcpSolver] = (
-            None  # Gets compiled in reset() if GP has been trained
+        self.f_disc_nom = cs.Function("f_disc_nom", [x, u], [self.acados_model.disc_dyn_expr])
+        self.f_disc_gp = cs.Function(
+            "f_disc_gp", [x, u, sym_gp_params], [acados_model.disc_dyn_expr]
         )
-        self.x_prev: Optional[NDArray] = None
-        self.u_prev: Optional[NDArray] = None
 
-    def reset(self):
-        """Reset the controller before running."""
-        self.traj_step = 0
-        if self._requires_recompile:  # GPs have changed, Acados must be recompiled
-            assert self.gaussian_process is not None, "GP must be trained before reinitializing"
-            n_samples = self.gaussian_process[0].train_targets.shape[0]
-            if self.sparse:
-                n_samples = min(n_samples, self.max_gp_samples)
-            # Reinitialize Acados model and solver -> leads to recompilation of the Acados solver
-            acados_model = self.setup_acados_model(n_samples)
-            ocp = self.setup_acados_optimizer(acados_model, n_samples)
-            remove_path(ocp.code_export_directory)  # Remove old code directory if it exists
-            remove_path(self.json_file)  # Remove old json file if it exists
-            self.acados_solver = AcadosOcpSolver(ocp, json_file=self.json_file, verbose=False)
-            self._requires_recompile = False
-        # Previously solved states & inputs
-        self.x_prev = None
-        self.u_prev = None
+        # Remove continuous forms (since integrator_type=DISCRETE)
+        acados_model.f_expl_expr = None
+        acados_model.f_impl_expr = None
+        return acados_model
 
-    def preprocess_data(self, x: NDArray, u: NDArray, x_next: NDArray) -> tuple[NDArray, NDArray]:
-        """Convert trajectory data for GP trianing.
+    def update_tightening_parameters(self, max_tightening: float = 0.3) -> np.ndarray:
+        """Propagate state covariance under GP residual (process) noise and compute box constraint tightening margins. Partially hardcoded for sparse parameterization.
+
+        Assumes positive tightening parameters are added to the left-hand side of the constraints, e.g., Ax <= b  -> Ax <= b - margin.
+
+        Args:
+            max_tightening (float): Maximum allowed tightening margin as a fraction of the constraint range.
+
+        Returns:
+            np.ndarray of shape (2*nx + 2*nu, T+1):
+                [ state_margins (2*nx, T+1);
+                  input_margins (2*nu, T+1) ]
+        """
+        nx, nu, T = self.nx, self.nu, self.T
+        margins_state = np.zeros((2 * nx, T + 1))
+        margins_input = np.zeros((2 * nu, T + 1))
+
+        # If probability tightening disabled or missing trajectory, return zeros
+        if (
+            self.gpmpc_cfg.prob <= 0.0
+            or self.x_sol_last is None
+            or self.u_sol_last is None
+            or not self._gp_initialized
+        ):
+            return np.concatenate([margins_state, margins_input], axis=0)
+
+        state_mapping = self.mpc_cfg.state_mapping
+        action_mapping = self.mpc_cfg.action_mapping
+        # Construct linearization matrices and residual injection matrix
+        A_k = self.prior_A  # (nx, nx)
+        B_k = self.prior_B  # (nx, nu)
+        # Residual mapping matrix Bd: Assumes residual outputs order = ["acc", "dphi", "dtheta"]
+        Bd = np.zeros((nx, len(self.gpmpc_cfg.gp_outputs)))  # (nx, n_res)
+        # Acceleration residual affects velocity derivatives
+        idx_vx, idx_vy, idx_vz = state_mapping["dx"], state_mapping["dy"], state_mapping["dz"]
+        idx_dphi, idx_dtheta = state_mapping["dphi"], state_mapping["dtheta"]
+        # Simple isotropic split of scalar thrust residual into xyz:
+        Bd[idx_vx, 0] = 1.0 / np.sqrt(3)
+        Bd[idx_vy, 0] = 1.0 / np.sqrt(3)
+        Bd[idx_vz, 0] = 1.0 / np.sqrt(3)
+        Bd[idx_dphi, 1] = 1.0
+        Bd[idx_dtheta, 2] = 1.0
+
+        # Extract planned trajectories
+        Xh = self.x_sol_last  # (T+1, nx)
+        Uh = self.u_sol_last  # (T, nu)
+
+        # Build grouped inputs for each GP
+        grouped_inputs = []
+        for group in self.gpmpc_cfg.gp_inputs:
+            cols = []
+            for var in group:
+                if var in state_mapping:
+                    cols.append(Xh[:-1, state_mapping[var]])
+                elif var in action_mapping:
+                    cols.append(Uh[:, action_mapping[var]])
+                else:
+                    raise KeyError(f"Variable {var} not found in mappings.")
+            grouped_inputs.append(np.stack(cols, axis=1))  # (T, group_dim)
+
+        # Query predictive variances from each single-output GP
+        gp_vars = []
+        gp_means = []
+        for gp_model, Z in zip(self.gp._gps, grouped_inputs):
+            mean, var = gp_model.predict(torch.tensor(Z, dtype=torch.float32))
+            gp_vars.append(var.numpy())  # shape (T,)
+            gp_means.append(mean.numpy())
+
+        # Ensure ordering matches gp_outputs
+        # gp_outputs default: ["acc", "dphi", "dtheta"]
+        output_order = self.gpmpc_cfg.gp_outputs
+        var_dict = {name: v for name, v in zip(output_order, gp_vars)}
+        # Build (T, n_res)
+        residual_var = np.vstack([var_dict["acc"], var_dict["dphi"], var_dict["dtheta"]]).T
+        residual_var = np.maximum(residual_var, 1e-10)
+        # ####################################################################
+        # Task 3.3 Compute covariance propagation and constraint tightening margins.
+        # For each k in 0,...,T-1:
+        # - Unpack residual_var at time k to get process noise covariance Sigma_d
+        # - Compute input covariance Sigma_u via local feedback δu ≈ K δx
+        # - Compute state-input covariance Sigma_xu
+        # - Compute margins at time k using z and the diagonal of Sigma_x and Sigma_u
+        # - Propagate state covariance to next time step using the linearized dynamics
+        # Compute terminal margins at time T
+        ########################################################################
+        # Show variables
+        K = self.lqr_gain  # (nu, nx)
+        z = self.inverse_cdf
+        A_k = A_k
+        B_k = B_k
+        Bd = Bd
+        Sigma_d, Sigma_u, Sigma_xu, Sigma_ux = (
+            None,
+            None,
+            None,
+            None,
+        )  # Compute those in each iteration
+        Sigma_x = np.zeros((nx, nx))  # Initialize state covariance
+        
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+        ########################################################################
+        #                           END OF YOUR CODE
+        ########################################################################
+        assert margins_state.shape == (2 * nx, T + 1)
+        assert margins_input.shape == (2 * nu, T + 1)
+
+        # Clip to maximum allowed tightening
+        state_range = self.X_HIGH - self.X_LOW
+        input_range = self.U_HIGH - self.U_LOW
+        for i in range(2 * nx):
+            margins_state[i, :] = np.minimum(
+                margins_state[i, :], max_tightening * state_range[i % nx]
+            )
+        for i in range(2 * nu):
+            margins_input[i, :] = np.minimum(
+                margins_input[i, :], max_tightening * input_range[i % nu]
+            )
+
+        return np.concatenate([margins_state, margins_input], axis=0)
+
+    def _modify_constraints_for_tightening(self, acados_model: AcadosModel):
+        """Define tightened state and input constraints by adding the tightening parameters on the left side, e.g., Ax <= b  -> Ax <= b - margin."""
+        tightening_params = self.gpmpc_registry.add_param(
+            name="tightening",
+            size=2 * self.nx + 2 * self.nu,
+            update_fcn=self.update_tightening_parameters,
+        )
+
+        state_constr, input_constr = self.create_tightened_constraints(
+            tightening_params=tightening_params, x=acados_model.x, u=acados_model.u
+        )
+
+        self.gpmpc_registry.add_constraint(
+            "state", state_constr, ["path", "terminal"], allow_slack=False
+        )
+        self.gpmpc_registry.add_constraint(
+            "input", input_constr, ["initial", "path"], allow_slack=False
+        )
+
+    def create_tightened_constraints(
+        self, tightening_params: cs.MX, x: cs.MX, u: cs.MX
+    ) -> Tuple[cs.MX, cs.MX]:
+        """Create tightened state and input constraint expressions for given tightening parameters.
+
+        Args:
+            tightening_params (cs.MX): Tightening parameters of shape (2*nx + 2*nu,).
+            x (cs.MX): State variable of shape (nx,).
+            u (cs.MX): Input variable of shape (nu,).
+
+        Returns:
+            Tuple[cs.MX, cs.MX]: State and input constraint expressions with shape (2*nx,) and (2*nu,), respectively.
+        """
+        #####################################################################
+        # Task 3.1 Create symbolic expressions for tightened box constraints in the form
+        # Ax <= b  -> Ax <= b - margin
+        # where margin is a positive tightening parameter added to the left-hand side.
+        #####################################################################
+        nx = x.shape[0]
+        nu = u.shape[0]
+        state_tightening_params = tightening_params[: 2 * nx]
+        input_tightening_params = tightening_params[2 * nx :]
+        X_low = self.X_LOW[:nx]
+        X_high = self.X_HIGH[:nx]
+        U_low = self.U_LOW[:nu]
+        U_high = self.U_HIGH[:nu]
+        state_constr: cs.MX = None  # compute this
+        input_constr: cs.MX = None  # compute this
+
+        # ####################################################################
+        
+
+
+
+
+
+
+
+
+
+        ######################################################################
+        #                           END OF YOUR CODE
+        ######################################################################
+        return state_constr, input_constr
+
+    def select_action(self, x0):
+        if not self._gpmpc_initialized:
+            self.ctrl_type = "MPC"
+            return super().select_action(x0)
+        else:
+            self.ctrl_type = "GPMPC"
+            u = self.step_control(
+                solver=self.gpmpc_solver,
+                x0=x0,
+                registry=self.gpmpc_registry,
+                update_params=["tightening"],
+            )
+        self.logger.debug(f"Used controller: {self.ctrl_type}")
+        return u
+
+    def _preprocess_data(self, x: np.ndarray, u: np.ndarray, x_next: np.ndarray):
+        """Process trajectory data for the Gaussian Processes.
+
+        Note: This is hardcoded for low-dimensional ResidualGP for the attitude model.
 
         Args:
             x (NDArray): State sequence of shape (N, nx).
@@ -156,597 +484,134 @@ class GPMPC:
             x_next (NDArray): Next state sequence of shape (N, nx).
 
         Returns:
-            Tuple[NDArray, NDArray]: Inputs and targets for GP training, shapes (N, nx+nu) and (N, nx).
+            Tuple[NDArray, NDArray]: Inputs and targets for GP training, shapes (N, 7) and (N, 3).
         """
+        # Unpack mappings
+        state_mapping = self.mpc_cfg.state_mapping
+        action_mapping = self.mpc_cfg.action_mapping
         # Get the predicted dynamics. This is a linear prior, thus we need to account for the fact that it is linearized about an eq using self.X_GOAL and self.U_GOAL.
-        g = 9.81
+        g = 9.81  # Gravity constant
         dt = self.dt
-        thrust_cmd = u[:, 0]
+
         x_dot = (x_next - x) / dt  # Approximate via numerical differentiation
+        thrust_idx = action_mapping["thrust"]
+        thrust_cmd = u[:, thrust_idx]
 
         # Faster than broadcasted version of np.linalg.norm
-        acc = np.sqrt(x_dot[:, 1] ** 2 + x_dot[:, 3] ** 2 + (x_dot[:, 5] + g) ** 2)
+        dx_idx, dy_idx, dz_idx = state_mapping["dx"], state_mapping["dy"], state_mapping["dz"]
+        acc = np.sqrt(x_dot[:, dx_idx] ** 2 + x_dot[:, dy_idx] ** 2 + (x_dot[:, dz_idx] + g) ** 2)
         acc_prior = self.acc_symbolic_fn(thrust_cmd).full().flatten()
         acc_target = acc - acc_prior
         acc_input = thrust_cmd.reshape(-1, 1)
 
-        idx_phi, idx_d_phi, idx_phi_cmd = 6, 9, 1
-        phi = x_dot[:, idx_phi]
-        phi_prior = self.prior_dynamics(x=x.T, u=u.T)["f"].toarray()[idx_phi, :]
-        phi_target = phi - phi_prior
-        phi_input = np.vstack((x[:, idx_phi], x[:, idx_d_phi], u[:, idx_phi_cmd])).T
+        phi_idx, dphi_idx, phi_cmd_idx = (
+            state_mapping["phi"],
+            state_mapping["dphi"],
+            action_mapping["phi_cmd"],
+        )
+        dphi_meas = x_dot[:, phi_idx]
+        dphi_prior = self.symbolic_model.fc_func(x=x.T, u=u.T)["f"].toarray()[phi_idx, :]
+        phi_target = dphi_meas - dphi_prior
+        phi_input = np.vstack((x[:, phi_idx], x[:, dphi_idx], u[:, phi_cmd_idx])).T
 
-        idx_theta, idx_d_theta, idx_theta_cmd = 7, 10, 2
-        theta = x_dot[:, idx_theta]
-        theta_prior = self.prior_dynamics(x=x.T, u=u.T)["f"].toarray()[idx_theta, :]
-        theta_target = theta - theta_prior
-        theta_input = np.vstack((x[:, idx_theta], x[:, idx_d_theta], u[:, idx_theta_cmd])).T
+        theta_idx, dtheta_idx, dtheta_cmd_idx = (
+            state_mapping["theta"],
+            state_mapping["dtheta"],
+            action_mapping["theta_cmd"],
+        )
+        dtheta_meas = x_dot[:, theta_idx]
+        dtheta_prior = self.symbolic_model.fc_func(x=x.T, u=u.T)["f"].toarray()[theta_idx, :]
+        theta_target = dtheta_meas - dtheta_prior
+        theta_input = np.vstack((x[:, theta_idx], x[:, dtheta_idx], u[:, dtheta_cmd_idx])).T
 
         train_input = np.concatenate([acc_input, phi_input, theta_input], axis=-1)
         train_output = np.vstack((acc_target, phi_target, theta_target)).T
         return train_input, train_output
 
-    def train_gp(self, x: NDArray, y: NDArray, lr: float, iterations: int, val_split: float = 0.2):
-        """Fit the GPs to the training data.
+    def add_data(self, x: np.ndarray, u: np.ndarray, x_next: np.ndarray):
+        """Add new data for residual training to the replay buffer."""
+        if x.ndim == 1:  # single sample fallback
+            x = x[None, :]
+            u = u[None, :]
+            x_next = x_next[None, :]
+        x_train, y_train = self._preprocess_data(x, u, x_next)
+        # Detach to CPU for buffer (assuming buffer expects numpy)
+        x_train = torch.tensor(x_train, dtype=torch.float32).cpu()
+        y_train = torch.tensor(y_train, dtype=torch.float32).cpu()
+        self.replay_buffer.add(x_train, y_train)
+
+    def fit(self):
+        X, Y = self.replay_buffer.get_dataset()
+        if X is None or X.shape[0] == 0:
+            self.logger.debug("No data in replay buffer; skipping GP train.")
+            return
+        X_t = torch.as_tensor(X, dtype=torch.float32)
+        Y_t = torch.as_tensor(Y, dtype=torch.float32)
+        # Split data for each GP (Harcoded see _preprocess_data for details)
+        X_list = [X_t[:, :1], X_t[:, 1:4], X_t[:, 4:]]
+        Y_list = [Y_t[:, :1], Y_t[:, 1:2], Y_t[:, 2:]]
+        if not self._gp_initialized:
+            # Use initial feature data for inducing point selection
+            self.setup_gp(X_list, Y_list, override=True)
+
+        self.gp.fit(X_list, Y_list)
+        # After first training, build solver if not built
+        if not self._gpmpc_initialized:
+            self.setup_gpmpc(override=True)
+
+        self.gpmpc_registry.update_params(self.gpmpc_solver, which=["gp_params"])
+
+    def evaluate_dynamics_quality(
+        self, test_x: np.ndarray, test_u: np.ndarray, test_x_next: np.ndarray, plot: bool = True
+    ):
+        """Evaluate and compare the prediction quality of the nominal model and GP-augmented model.
 
         Args:
-            x (NDArray): Training inputs, shape (N, D).
-            y (NDArray): Training targets, shape (N, O).
-            lr (float): Learning rate for GP optimization.
-            iterations (int): Number of optimization iterations.
-            val_split (float): Fraction of data to use for validation dataset (0-1).
+            test_x: (N, nx) Test states.
+            test_u: (N, nu) Test actions.
+            test_x_next: (N, nx) True next states.
+            plot: Whether to plot results.
         """
-        assert val_split >= 0 and val_split <= 1, "Expected val_split to be in [0, 1]"
-        x_train = torch.tensor(x, device=self.device)
-        y_train = torch.tensor(y, device=self.device)
-        n = x_train.shape[0]
-        n_val = int(n * val_split)
-        if n_val > 0:
-            # Shuffle the training data and split into training and validation sets
-            idx = torch.randperm(n)
-            val_x, val_y = x_train[idx[:n_val]], y_train[idx[:n_val]]
-            x_train, y_train = x_train[idx[n_val:]], y_train[idx[n_val:]]
-        else:
-            val_x, val_y = None, None
-        ########################################################################
-        # Task 2.2                                                             
-        # TODO:                                                                
-        # 1. For each group of input indices in "self.gp_idx":                 
-        #    a. Extract the relevant columns from the 'x_train'                
-        #       for this GP.                                                   
-        #    b. Extract the corresponding target output from `y`.              
-        #    c. Create a GaussianProcess object for this input-output pair.    
-        #    d. Fit the GP using the provided learning rate, number of         
-        #       iterations, optional (extracted) validation data,              
-        #       and imported `fit_gp` function,  (Task 1.2)                    
-        # 2. Store all trained GaussianProcess objects in                      
-        #    `self.gaussian_process` as a list.                                
-        ########################################################################
-        
-
-
-
-
-
-
-
-
-
-
-        ########################################################################
-        #                           END OF YOUR CODE                           
-        ########################################################################
-        self._requires_recompile = True
-
-    def setup_acados_model(self, n_samples: int) -> AcadosModel:
-        """Setup the Acados model for MPC.
-
-        Args:
-            n_samples (int): Number of samples for GP approximation.
-
-        Returns:
-            AcadosModel: Configured Acados model.
-        """
-        acados_model = AcadosModel()
-        acados_model.x = self.model.x_sym
-        acados_model.u = self.model.u_sym
-
-        z = cs.vertcat(acados_model.x, acados_model.u)  # GP prediction point
-        nx = self.model.nx
-        idx_T, idx_R, idx_P = [0 + nx], [6, 9, 1 + nx], [7, 10, 2 + nx]
-
-        if self.sparse:
-            K_zs_T_cs, K_zs_R_cs, K_zs_P_cs = self.sparse_gp_kernels_cs(n_samples)
-
-            x_sparse = cs.MX.sym("x_sparse", n_samples, 7)
-            posterior_mean = cs.MX.sym("posterior_mean", 3, n_samples)
-            # Acados supports only 1D parameters
-            flat_x_sparse = cs.reshape(x_sparse, -1, 1)
-            flat_posterior_mean = cs.reshape(posterior_mean, -1, 1)
-            acados_model.p = cs.vertcat(flat_x_sparse, flat_posterior_mean)
-
-            T_pred = cs.sum2(K_zs_T_cs(z1=z[idx_T], z2=x_sparse)["K"] * posterior_mean[0, :])
-            R_pred = cs.sum2(K_zs_R_cs(z1=z[idx_R], z2=x_sparse)["K"] * posterior_mean[1, :])
-            P_pred = cs.sum2(K_zs_P_cs(z1=z[idx_P], z2=x_sparse)["K"] * posterior_mean[2, :])
-        else:
-            T_pred = gpytorch_predict2casadi(self.gaussian_process[0])(z=z[idx_T])["mean"]
-            R_pred = gpytorch_predict2casadi(self.gaussian_process[1])(z=z[idx_R])["mean"]
-            P_pred = gpytorch_predict2casadi(self.gaussian_process[2])(z=z[idx_P])["mean"]
-
-        idx_phi, idx_theta = 6, 7
-        ax_sym = T_pred * (cs.cos(acados_model.x[idx_phi]) * cs.sin(acados_model.x[idx_theta]))
-        ay_sym = T_pred * (-cs.sin(acados_model.x[idx_phi]))
-        az_sym = T_pred * (cs.cos(acados_model.x[idx_phi]) * cs.cos(acados_model.x[idx_theta]))
-        res_dyn = cs.vertcat(0, ax_sym, 0, ay_sym, 0, az_sym, 0, 0, 0, R_pred, P_pred, 0)
-
-        f_cont = self.prior_dynamics(x=acados_model.x, u=acados_model.u)["f"] + res_dyn
-        f_cont_fn = cs.Function(
-            "f_cont_fn", [acados_model.x, acados_model.u, acados_model.p], [f_cont]
+        assert self._gp_initialized, "GP not initialized."
+        assert self._gpmpc_initialized, "GP-MPC not initialized."
+        assert test_x.shape[0] == test_u.shape[0] == test_x_next.shape[0], (
+            "Mismatched test data lengths."
         )
-
-        # Use rk4 to discretize the continuous dynamics
-        acados_model.disc_dyn_expr = discretize_dynamics_rk4(
-            f_cont_fn, self.dt, acados_model.x, acados_model.u, p=acados_model.p, as_function=False
-        )
-
-        # It is critical to change the name of the model for different number of samples. Acados will silently reuse parts of a previous model if the names are the same. This leads to shape mismatch errors in the constraints, which grow with the number of samples. Hence, we add a postfix to the model name that changes with the number of samples used to construct the model and avoid the reuse of params. See: https://github.com/acados/acados/issues/905
-        acados_model.name = "gpmpc" + str(n_samples)
-        acados_model.t_label = "time"
-
-        return acados_model
-
-    def setup_acados_optimizer(self, acados_model: AcadosModel, n_samples: int) -> AcadosOcp:
-        """Setup the Acados optimizer.
-
-        Args:
-            acados_model (AcadosModel): The Acados model.
-            n_samples (int): Number of samples for GP approximation.
-
-        Returns:
-            AcadosOcp: Configured Acados OCP.
-        """
-        ocp = AcadosOcp()
-        ocp.model = acados_model
-        nx, nu = self.model.nx, self.model.nu
-        ny = nx + nu
-        ny_e = nx
-
-        # Configure costs
-        ocp.cost.cost_type = "LINEAR_LS"
-        ocp.cost.cost_type_e = "LINEAR_LS"
-        ocp.cost.W = scipy.linalg.block_diag(self.Q, self.R)
-        ocp.cost.W_e = self.Q
-        ocp.cost.Vx = np.zeros((ny, nx))
-        ocp.cost.Vx[:nx, :nx] = np.eye(nx)
-        ocp.cost.Vu = np.zeros((ny, nu))
-        ocp.cost.Vu[nx : (nx + nu), :nu] = np.eye(nu)
-        ocp.cost.Vx_e = np.eye(nx)
-
-        # Constraints
-        s_low = np.array([-2, -15, -2, -15, -0.05, -15, -1.5, -1.5, -10, -8.5, -8.5, -10])
-        s_high = np.array([2, 15, 2, 15, 2, 15, 1.5, 1.5, 10, 8.5, 8.5, 10])
-        state_cnstr = self.setup_constraints(ocp.model.x, s_low, s_high)
-        if self.action_space is not None:
-            u_low = self.action_space["low"]
-            u_high = self.action_space["high"]
-        else:
-            u_low = np.array([0.12, -0.43, -0.43, -0.43])
-            u_high = np.array([0.59, 0.43, 0.43, 0.43])
-        input_cnstr = self.setup_constraints(ocp.model.u, u_low, u_high)
-        ocp = self.setup_acados_constraints(ocp, state_cnstr, input_cnstr)
-
-        # Initialize with placeholder zero values
-        ocp.cost.yref = np.zeros((ny,))
-        ocp.cost.yref_e = np.zeros((ny_e,))
-        ocp.parameter_values = np.zeros((ocp.model.p.shape[0],))
-        ocp.constraints.x0 = np.zeros((nx))
-
-        # Set up solver options
-        ocp.solver_options.N_horizon = self.T  # prediction horizon
-        ocp.solver_options.qp_solver = "PARTIAL_CONDENSING_HPIPM"
-        ocp.solver_options.hessian_approx = "GAUSS_NEWTON"
-        ocp.solver_options.integrator_type = "DISCRETE"
-        ocp.solver_options.nlp_solver_type = "SQP"
-        ocp.solver_options.nlp_solver_max_iter = 25
-        ocp.solver_options.tf = self.T * self.dt  # prediction duration
-        ocp.code_export_directory = str(self.output_dir / "gpmpc_c_generated_code")
-
-        if self.sparse:
-            posterior_mean, train_inputs = self.precompute_sparse_posterior_mean(n_samples)
-        else:
-            posterior_mean, train_inputs = self.precompute_posterior_mean()
-        # Casadi use column major order, while np uses row major order by default
-        train_inputs = train_inputs.reshape(-1, 1, order="F")
-        posterior_mean = posterior_mean.reshape(-1, 1, order="F")
-        dyn_value = np.concatenate((train_inputs, posterior_mean), axis=0)
-        self.gp_state_input = np.tile(dyn_value, (1, self.T + 1))
-        return ocp
-
-    def setup_acados_constraints(
-        self, ocp: AcadosOcp, state_cnstr: cs.MX, input_cnstr: cs.MX
-    ) -> AcadosOcp:
-        """Setup state and input constraints for Acados OCP.
-
-        Args:
-            ocp (AcadosOcp): The Acados OCP.
-            state_cnstr (cs.MX): State constraints.
-            input_cnstr (cs.MX): Input constraints.
-
-        Returns:
-            AcadosOcp: OCP with constraints applied.
-        """
-        initial_cnstr = cs.vertcat(state_cnstr, input_cnstr)
-        cnstr = cs.vertcat(state_cnstr, input_cnstr)
-        terminal_cnstr = cs.vertcat(state_cnstr)  # Terminal constraints are only state constraints
-        state_tighten_param = cs.MX.sym("state_tighten_param", *state_cnstr.shape)
-        input_tighten_param = cs.MX.sym("input_tighten_param", *input_cnstr.shape)
-        state_input_tighten_param = cs.vertcat(state_tighten_param, input_tighten_param)
-
-        # pass the constraints to the ocp object
-        ocp.model.con_h_expr_0 = initial_cnstr - state_input_tighten_param
-        ocp.model.con_h_expr = cnstr - state_input_tighten_param
-        ocp.model.con_h_expr_e = terminal_cnstr - state_tighten_param
-        ocp.dims.nh_0 = initial_cnstr.shape[0]
-        ocp.dims.nh = cnstr.shape[0]
-        ocp.dims.nh_e = terminal_cnstr.shape[0]
-
-        # All constraints are defined as g(x, u) <= tol. Acados requires the constraints to be
-        # defined as lb <= g(x, u) <= ub. Thus, a large negative number (-1e8) is used as the lower
-        # bound to ensure that the constraints are not active. np.prod makes sure all ub and lb are
-        # 1D numpy arrays
-        # See: https://github.com/acados/acados/issues/650
-        # See: https://discourse.acados.org/t/infeasible-qps-when-using-nonlinear-casadi-constraint-expressions/1595/5?u=mxche
-        ocp.constraints.uh_0 = -1e-8 * np.ones(np.prod(initial_cnstr.shape))
-        ocp.constraints.lh_0 = -1e8 * np.ones(np.prod(initial_cnstr.shape))
-        ocp.constraints.uh = -1e-8 * np.ones(np.prod(cnstr.shape))
-        ocp.constraints.lh = -1e8 * np.ones(np.prod(cnstr.shape))
-        ocp.constraints.uh_e = -1e-8 * np.ones(np.prod(terminal_cnstr.shape))
-        ocp.constraints.lh_e = -1e8 * np.ones(np.prod(terminal_cnstr.shape))
-
-        # Pass the tightening variables to the ocp object as parameters
-        tighten_param = cs.vertcat(state_tighten_param, input_tighten_param)
-        ocp.model.p = cs.vertcat(ocp.model.p, tighten_param) if self.sparse else tighten_param
-
-        return ocp
-
-    def setup_symbolic_acceleration(self, params: dict) -> cs.Function:
-        T = cs.MX.sym("T_c")
-        T_mapping = params["a"] * T + params["b"]
-        return cs.Function("T_mapping", [T], [T_mapping])
-
-    @staticmethod
-    def setup_constraints(sym: cs.MX, low: NDArray, high: NDArray) -> cs.MX:
-        dim = low.shape[0]
-        A = np.vstack((-np.eye(dim), np.eye(dim)))
-        b = np.hstack((-low, high))
-        return A @ sym - b
-
-    def select_action(self, obs: NDArray) -> NDArray:
-        """Select the next action based on the current observation.
-
-        Args:
-            obs (NDArray): Current observation.
-
-        Returns:
-            NDArray: Selected action.
-        """
-        assert not self._requires_recompile, "Acados model must be recompiled"
-        assert self.gaussian_process is not None, "Gaussian processes are not initialized"
-        # Set initial condition (0-th state)
-        self.acados_solver.set(0, "lbx", obs)
-        self.acados_solver.set(0, "ubx", obs)
-        nu = self.model.nu
-        # Set the probabilistic state and input constraint limits
-        state_constraint, input_constraint = self.propagate_constraint_limits()
-        # Extend input constraints to T, set to zero at terminal step
-        input_constraint = np.concatenate((input_constraint, np.zeros((2 * nu, 1))), axis=1)
-        if self.sparse:
-            p = np.concatenate((self.gp_state_input, state_constraint, input_constraint), axis=0)
-        else:
-            p = np.concatenate((state_constraint, input_constraint), axis=0)
-        p = p.T.flatten()
-        if (p_acados := self.acados_solver.get_flat("p")).shape != p.shape:
-            raise ValueError(f"p shape mismatch: {p_acados.shape} != {p.shape}")
-        self.acados_solver.set_flat("p", p)
-
-        # Set reference for the control horizon
-        goal_states = self.reference_trajectory()
-        self.traj_step += 1
-        y_ref = np.concatenate((goal_states[:, :-1], self.ref_action), axis=0)
-        for idx in range(self.T):
-            self.acados_solver.set(idx, "yref", y_ref[:, idx])
-        self.acados_solver.set(self.T, "yref", goal_states[:, -1])
-
-        # solve the optimization problem
-        status = self.acados_solver.solve()
-        assert status in [0, 2], f"acados returned unexpected status {status}."
-        self.x_prev = self.acados_solver.get_flat("x").reshape(self.T + 1, -1).T
-        self.u_prev = self.acados_solver.get_flat("u").reshape(self.T, -1).T
-        return self.acados_solver.get(0, "u")
-
-    def precompute_posterior_mean(self) -> tuple[np.ndarray, np.ndarray]:
-        """Precompute the posterior mean and for each GP."""
-        ########################################################################
-        # Task 2.3                                                             
-        # TODO:                                                                
-        # 1. For each trained GP in `self.gaussian_process`:                   
-        #    a. Compute the posterior mean by solving the linear system        
-        #       involving the GP's kernel matrix and training targets.         
-        #    b. Concatenate the training input tensors for all GPs along the   
-        #       last dimension.                                                
-        # 3. Return both the stacked posterior means and the concatenated      
-        #    training inputs as numpy arrays.                                  
-        ########################################################################
-        
-
-
-
-
-
-
-
-        ########################################################################
-        #                           END OF YOUR CODE                           
-        ########################################################################
-        return posterior_mean_numpy, train_data_numpy
-
-    def precompute_sparse_posterior_mean(self, n_samples: int) -> tuple[np.ndarray, np.ndarray]:
-        """Precompute the sparse posterior mean using the FITC approximation.
-
-        Args:
-            n_samples (int): Number of inducing points.
-
-        Returns:
-            Tuple[np.ndarray, np.ndarray]: Sparse posterior means and sparse inputs as numpy arrays.
-        """
-        ########################################################################
-        # Task 2.4                                                             
-        # TODO:                                                                
-        # 1. Use KMeans clustering to select `n_samples` inducing points from  
-        #    the combined training inputs of all GPs. (use random_state = 0)   
-        # 2. For each GP:                                                      
-        #    a. Extract the relevant subset of the selected inducing points    
-        #       corresponding to the GP's input dimensions.                    
-        #    b. Compute the following matrices:                                
-        #       - K_ss: Kernel matrix of inducing points.                      
-        #       - K_xs: Kernel matrix between training inputs and inducing     
-        #         points.                                                      
-        #       - Gamma: Diagonal correction term for FITC.                    
-        #       - Gamma_inv: Inverse of Gamma as a diagonal matrix.            
-        #       - Sigma_inv: FITC covariance matrix for inducing points.       
-        #    c. Compute the FITC sparse posterior mean for these inducing      
-        #       points using the formula:                                      
-        #       posterior_mean = torch.linalg.solve(Sigma_inv, K_xs.T) @       
-        #                        Gamma_inv @ targets                           
-        #    d. Store the posterior mean for this GP.
-        # 3. Stack the sparse posterior means for all GPs and return them      
-        #    together with the selected inducing points as numpy arrays.       
-        ########################################################################
-
-        inputs = torch.cat([gp.train_inputs[0] for gp in self.gaussian_process], dim=-1)
-        targets = torch.stack([gp.train_targets for gp in self.gaussian_process], dim=1)
-        kmeans_random_state = 0  # Random state for reproducibility
-
-        
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-        ########################################################################
-        #                           END OF YOUR CODE                           
-        ########################################################################
-        return posterior_mean.numpy(force=True), sparse_inputs.numpy(force=True)
-
-    def sparse_gp_kernels_cs(self, n_samples: int) -> List[cs.Function]:
-        """Create CasADi functions for sparse GP kernels.
-
-        Args:
-            n_samples (int): Number of inducing points.
-
-        Returns:
-            List[ccs.Function]: CasADi kernel functions for each GP.
-        """
-        gps = self.gaussian_process
-
-        lengthscales = [gp.covar_module.base_kernel.lengthscale.numpy(force=True) for gp in gps]
-        scales = [gp.covar_module.outputscale.numpy(force=True) for gp in gps]
-        Nx = sum([gp.train_inputs[0].shape[1] for gp in self.gaussian_process])
-
-        # Create CasADI function for computing the kernel K_zs with parameters for z, s, length scales and output scaling. We need the CasADI version of this for symbolic differentiation in the MPC optimization.
-        z1s = [cs.SX.sym("z1", gp.train_inputs[0].shape[1]) for gp in gps]
-        z2 = cs.SX.sym("z2", n_samples, Nx)
-        # Compute the kernel functions for each GP
-        ks = [
-            covSE_vectorized(z1s[i], z2[:, self.gp_idx[i]], lengthscales[i], scales[i])
-            for i in range(len(gps))
-        ]
-        ks_fn = [
-            cs.Function("K_s", [z1s[i], z2], [ks[i]], ["z1", "z2"], ["K"]) for i in range(len(gps))
-        ]
-        return ks_fn
-
-    @torch.no_grad()
-    def propagate_constraint_limits(self) -> tuple[np.ndarray, np.ndarray]:
-        """Propagate the state and input constraints forward using the GP dynamics.
-
-        This function computes the state and input constraints for the MPC horizon based on the
-        previous state and input trajectories, the GP dynamics, and the LQR gain.
-        It uses the Gaussian processes to approximate the uncertainty in the dynamics and tightens
-        the constraints accordingly.
-
-        Returns:
-            Tuple[np.ndarray, np.ndarray]: State and input constraints for the MPC horizon.
-        """
-        # 2 constraints per state and input. One to bound from below, one to bound from above.
-        state_constraint = np.zeros((self.model.nx * 2, self.T + 1))
-        input_constraint = np.zeros((self.model.nu * 2, self.T))
-
-        if self.x_prev is None or self.u_prev is None:  # No previous rollout, return all zeros
-            return state_constraint, input_constraint
-
-        # cov_x can also be initialized with a diagonal matrix, i.e. np.eye(self.model.nx) * sigma
-        cov_x = np.zeros((self.model.nx, self.model.nx))
-        z = np.hstack((self.x_prev[:, :-1].T, self.u_prev.T))
-        z_tensor = torch.tensor(z, device=self.device)
-
-        covs_diag = []
-        for gp, idx in zip(self.gaussian_process, self.gp_idx):
-            gp.eval()
-            with fast_pred_var(state=True), fast_pred_samples(state=True):
-                cov = gp.likelihood(gp(z_tensor[:, idx])).covariance_matrix
-            covs_diag.append(torch.diag(cov).numpy(force=True))
-
-        idx_phi, idx_theta = 6, 7
-        cos_phi_sin_theta_2 = np.cos(z[:, idx_phi]) * np.sin(z[:, idx_theta]) ** 2
-        sin_phi_2 = (-np.sin(z[:, idx_phi])) ** 2
-        cos_phi_cos_theta_2 = (np.cos(z[:, idx_phi]) * np.cos(z[:, idx_theta])) ** 2
-
-        cov_d_batch = np.zeros((z.shape[0], 5, 5))
-        cov_d_batch[:, 0, 0] = covs_diag[0] * cos_phi_sin_theta_2
-        cov_d_batch[:, 1, 1] = covs_diag[0] * sin_phi_2
-        cov_d_batch[:, 2, 2] = covs_diag[0] * cos_phi_cos_theta_2
-        cov_d_batch[:, 3, 3] = covs_diag[1]
-        cov_d_batch[:, 4, 4] = covs_diag[2]
-
-        cov_noise = [gp.likelihood.noise.numpy(force=True) for gp in self.gaussian_process]
-        cov_noise_batch = np.zeros((z.shape[0], 5, 5))
-        cov_noise_batch[:, 0, 0] = cov_noise[0] * cos_phi_sin_theta_2
-        cov_noise_batch[:, 1, 1] = cov_noise[0] * sin_phi_2
-        cov_noise_batch[:, 2, 2] = cov_noise[0] * cos_phi_cos_theta_2
-        cov_noise_batch[:, 3, 3] = cov_noise[1]
-        cov_noise_batch[:, 4, 4] = cov_noise[2]
-
-        # discretize
-        cov_noise_batch = cov_noise_batch * self.dt**2
-        cov_d_batch = cov_d_batch * self.dt**2
-
-        # Assuming that the state constraints are of the form A * x <= b and that the first half of
-        # the constraints are negative -> A = [-I, I]
-        state_cnstr_A = np.concatenate([-np.eye(self.model.nx), np.eye(self.model.nx)], axis=0)
-        input_cnstr_A = np.concatenate([-np.eye(self.model.nu), np.eye(self.model.nu)], axis=0)
-        inv_cdf_A_abs_state = self.inverse_cdf * np.abs(state_cnstr_A)
-        inv_cdf_A_abs_input = self.inverse_cdf * np.abs(input_cnstr_A)
-
-        ########################################################################
-        # Task 2.5                                                             
-        # TODO:                                                                
-        # For each time step in the MPC horizon:                               
-        # 1. Compute the current state covariance and the corresponding input  
-        #    covariance using the LQR gain (self.lqr_gain).                    
-        # 2. For each GP, approximate the output covariance (including GP mean 
-        #    and noise) at the current step.                                   
-        # 3. Use the computed covariances to tighten (shrink) the state and    
-        #    input constraints for probabilistic safety.                       
-        # 4. Propagate the state covariance forward to the next time step      
-        #    using the discrete-time dynamics and previous covariances.        
-        #    The dynamics are given by self.discrete_dfdx, self.discrete_dfdu, 
-        #    and self.Bd.                                                      
-        ########################################################################
-        
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-        ########################################################################
-        #                           END OF YOUR CODE                           
-        ########################################################################
-        # Update Final covariance.
-        state_constraint[:, -1] = -inv_cdf_A_abs_state @ np.sqrt(np.diag(cov_x))
-        return state_constraint, input_constraint
-
-    @staticmethod
-    def setup_prior_dynamics(
-        dfdx: NDArray, dfdu: NDArray, Q: NDArray, R: NDArray, dt: float
-    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-        """Compute the LQR gain used for propograting GP uncertainty from the prior dynamics."""
-        A, B = discretize_linear_system(dfdx, dfdu, dt, exact=True)
-        ########################################################################
-        # Task 2.1                                                             
-        # TODO:                                                                
-        # 1. Solve the discrete algebraic Riccati equation (DARE) to find the  
-        #   matrix optimal cost-to-go matrix. (Hint: see scipy.linalg package) 
-        # 2. Compute the LQR gain
-        ########################################################################
-        
-
-
-
-
-
-        ########################################################################
-        #                           END OF YOUR CODE                           
-        ########################################################################
-        return A, B, lqr_gain
-
-    def reference_trajectory(self) -> NDArray:
-        """Get the reference trajectory (assumed to be periodic).
-
-        Returns:
-            NDArray: Reference trajectory.
-        """
-        indices = np.arange(self.traj_step, self.traj_step + self.T + 1) % self.traj.shape[-1]
-        return self.traj[:, indices]  # (nx, T+1)
-
-    def infer_gps_only(
-        self, x: Union[np.ndarray, torch.Tensor]
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
-        """Infer the GP mean and std for a batch of inputs.
-
-        Args:
-            x (Union[np.ndarray, torch.Tensor]): Input data, shape (N, D).
-
-        Returns:
-            Tuple[torch.Tensor, torch.Tensor]: Means and stds, each shape (N, O).
-        """
-        assert self.gaussian_process is not None, "Gaussian processes are not initialized"
-        if isinstance(x, np.ndarray):
-            x = torch.tensor(x, dtype=torch.float32, device=self.device)
-        else:
-            x = x.to(self.device)
-        means = []
-        stds = []
-        for gp, idx in zip(self.gaussian_process, self.gp_idx):
-            mean, std = infer_gp(gp, x[:, idx], self.device)
-            means.append(mean.unsqueeze(1) if mean.ndim == 1 else mean)
-            stds.append(std.unsqueeze(1) if std.ndim == 1 else std)
-        means = torch.cat(means, dim=1)
-        stds = torch.cat(stds, dim=1)
-        return means, stds
+        # Prepare inputs for CasADi functions (shape: (nx, N), (nu, N))
+        x_in = test_x.T
+        u_in = test_u.T
+        N = test_x.shape[0]
+
+        # Get predictions
+        f_nom_map = self.f_disc_nom.map(N)
+        x_pred_nom = f_nom_map(x_in, u_in).full().T  # (N, nx)
+        f_gp_map = self.f_disc_gp.map(N)
+        gp_params = self.gp.update_residual_parameters()  # Get last trained parameters
+        x_pred_gp = f_gp_map(x_in, u_in, gp_params).full().T  # (N, nx)
+
+        # Compute errors
+        err_nom = np.linalg.norm(x_pred_nom - test_x_next, axis=1)
+        err_gp = np.linalg.norm(x_pred_gp - test_x_next, axis=1)
+        print(f"Nominal RMSE: {np.sqrt(np.mean(err_nom**2)):.4f}")
+        print(f"GP-augmented RMSE: {np.sqrt(np.mean(err_gp**2)):.4f}")
+
+        if plot:
+            import matplotlib.pyplot as plt
+
+            plt.figure(figsize=(10, 4))
+            plt.plot(err_nom, label="Nominal error")
+            plt.plot(err_gp, label="GP-augmented error")
+            plt.xlabel("Sample")
+            plt.ylabel("Prediction error (L2 norm)")
+            plt.legend()
+            plt.title("Dynamics Prediction Error")
+            plt.show()
+
+            plt.figure()
+            plt.hist(err_nom, bins=30, alpha=0.5, label="Nominal")
+            plt.hist(err_gp, bins=30, alpha=0.5, label="GP-augmented")
+            plt.xlabel("Prediction error (L2 norm)")
+            plt.ylabel("Count")
+            plt.legend()
+            plt.title("Prediction Error Histogram")
+            plt.show()

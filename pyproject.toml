@@ -16,7 +16,7 @@ classifiers = [
 ]
 
 dependencies = [
-    "crazyflow==0.0.2",
+    "crazyflow @ git+https://github.com/utiasDSL/crazyflow.git@4007847cfca44f02550e08ed5ca8cbf897961c1f",
     "warp",
     "array_api_compat",
     "munch",

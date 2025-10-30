@@ -1,4 +1,4 @@
-"""Iterative Linear Quadratic Regulator (LQR)."""
+"""Iterative Linear Quadratic Regulator (ILQR)."""
 
 import numpy as np
 from crazyflow.constants import GRAVITY, MASS

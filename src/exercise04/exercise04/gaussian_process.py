@@ -1,49 +1,169 @@
 import time
+from typing import Callable, Optional, Tuple, Union
 
 import gpytorch as gpy
 import numpy as np
 import torch
+from exercise04.utils import select_inducing_points, to_torch
 from scipy.spatial.distance import cdist
 from torch.utils.data import DataLoader, TensorDataset
 
 
-class GaussianProcess:
-    def __init__(self, kernel: str = "rbf", length_scale: float = 1.0, noise: float = 1e-8):
-        if kernel == "linear":
-            self.kernel = self.linear_kernel
-        elif kernel == "rbf":
-            self.kernel = self.rbf_kernel
-        else:
-            raise ValueError("Invalid kernel. Choose 'linear' or 'rbf'.")
+class BaseGaussianProcess:
+    def __init__(self, kernel: str = "rbf", kernel_params: dict = None, noise: float = 1e-8, X_train=None, y_train=None, max_samples: Optional[int] = 1000):
+        """Basic Gaussian Process implementation with different kernel options. Parameters for kernels must be provided as a dictionary.
 
-        self.length_scale = length_scale
-        self.output_std = 1  # hyperparameter
-        self.c = 0  # horizontal shift, hyperparameter
-        self.std_b = 0  # vertical shift, hyperparameter
+        Args:
+            kernel (str): Kernel type, options are "rbf", "linear", "poly", "matern", "exp".
+            kernel_params (dict): Parameters for the chosen kernel.
+            noise (float): Noise level for regularization.
+            X_train (np.ndarray, optional): Training inputs. Defaults to None.
+            y_train (np.ndarray, optional): Training targets. Defaults to None.
+            max_samples (int, optional): Maximum number of samples to use for training. Defaults to 1000.
+        """
+        self.kernel_params = kernel_params or {"length_scale": 1.0}
         self.noise = noise
-        self.X_train = None
-        self.y_train = None
+        self.max_samples = max_samples
+        assert isinstance(X_train, (type(None), np.ndarray)) and isinstance(y_train, (type(None), np.ndarray)), "X_train and y_train must be numpy arrays or None."
+        self.X_train = X_train
+        if y_train and len(y_train.shape) == 1:
+            y_train = y_train.reshape(-1, 1)
+        self.y_train = y_train
+        self.output_dim = None if y_train is None else y_train.shape[1]
+        self.set_kernel(kernel)
+
+
+    def set_kernel(self, kernel_type: str, kernel_params: dict = None):
+        """Set the kernel and its parameters.
+
+        Args:
+            kernel_type (str): Kernel type, options are "rbf", "linear", "poly", "matern", "exp".
+            kernel_params (dict): Parameters for the chosen kernel.
+        """
+        if not hasattr(self, f"{kernel_type}_kernel"):
+            raise ValueError(f"Kernel '{kernel_type}' not supported.")
+        self.kernel = getattr(self, f"{kernel_type}_kernel")
+        assert isinstance(self.kernel, Callable)
+        if kernel_params is not None:
+            self.kernel_params = kernel_params
+
+    def set_kernel_params(self, **kwargs : dict[str, any]):
+        """Set kernel parameters.
+
+        Args:
+            **kwargs: Kernel parameters to set.
+        """
+        self.kernel_params.update(kwargs)
+
+    def rbf_kernel(self, X1, X2):
+        """Radial Basis Function (RBF) kernel.
+
+        Inputs:
+            X1, X2 (np.ndarray): Input arrays.
+
+        Returns:
+            np.ndarray: Kernel matrix.
+        """
+        ########################################################################
+        # Task 1.1
+        # TODO:
+        # 1. Define distance measure
+        # 2. Define rbf_kernel
+        # Hints:
+        # 1. Use cdist from scipy.spatial.distance to compute the distance
+        # 2. Don't forget the length_scale
+        # 3. IMPORTANT The rbf kernel is not equal to the exponential kernel.
+        # You can find the equation for the rbf kernel for instance in
+        # wikipedia.
+        # https://en.wikipedia.org/wiki/Radial_basis_function_kernel.
+        # The variance (σ) is also called length scale.
+        ########################################################################
+        length_scale = self.kernel_params.get("length_scale", 1.0)
+
+        
+
+
+
+
+        ########################################################################
+        #                           END OF YOUR CODE
+        ########################################################################
+        return rbf_kernel
 
     def linear_kernel(self, X1, X2):
-        """Linear kernel."""
-        return self.std_b + self.output_std * (X1 - self.c) @ (X2 - self.c).T
+        """Linear kernel.
 
-    def rbf_kernel(self, X1, X2):
-        """Radial Basis Function (RBF) kernel."""
+        Inputs:
+            X1, X2 (np.ndarray): Input arrays.
+
+        Returns:
+            np.ndarray: Kernel matrix.
+        """
         ########################################################################
-        # Task 1.1                                                             
-        # TODO:                                                                
-        # 1. Define distance measure                                           
-        # 2. Define rbf_kernel                                                 
-        # Hints:                                                               
-        # 1. Use cdist from scipy.spatial.distance to compute the distance     
-        # 2. Don't forget the length_scale                                     
-        # 3. IMPORTANT The rbf kernel is not equal to the exponential kernel.  
-        # You can find the equation for the rbf kernel for instance in         
-        # wikipedia.                                                           
-        # https://en.wikipedia.org/wiki/Radial_basis_function_kernel.          
-        # The variance (σ) is also called length scale.                        
+        # Task 1.1
+        # TODO:
+        # 1. Implement linear kernel function
         ########################################################################
+        if self.X_train is not None:
+            c = np.mean(self.X_train, axis=0)
+        else:
+            c = self.kernel_params.get("c", 0)
+        output_std = self.kernel_params.get("output_std", 1)
+        std_b = self.kernel_params.get("std_b", 0)
+        
+
+
+
+        ########################################################################
+        #                           END OF YOUR CODE
+        ########################################################################
+        return linear_kernel
+
+    def polynomial_kernel(self, X1, X2):
+        """Polynomial kernel.
+
+        Inputs:
+            X1, X2 (np.ndarray): Input arrays.
+
+        Returns:
+            np.ndarray: Kernel matrix.
+        """
+        ########################################################################
+        # Task 1.1
+        # TODO:
+        # 1. Implement polynomial kernel function
+        ########################################################################
+        degree = self.kernel_params.get("degree", 2)
+        coef0 = self.kernel_params.get("coef0", 1)
+        
+
+
+
+        ########################################################################
+        #                           END OF YOUR CODE
+        ########################################################################
+        return poly_kernel
+
+    def matern_kernel(self, X1, X2):
+        """Matern kernel.
+
+        Inputs:
+            X1, X2 (np.ndarray): Input arrays.
+
+        Returns:
+            np.ndarray: Kernel matrix.
+        """
+        ########################################################################
+        # Task 1.1
+        # TODO:
+        # 1. Define distance measure
+        # 2. Implement Matern kernel function
+        #    Use nu=0.5, 1.5, or 2.5 (see Wikipedia for formulas)
+        # Hints:
+        # 1. Use cdist from scipy.spatial.distance to compute the distance
+        ########################################################################
+        length_scale = self.kernel_params.get("length_scale", 1.0)
+        nu = self.kernel_params.get("nu", 1.5)
         
 
 
@@ -51,111 +171,122 @@ class GaussianProcess:
 
 
 
+
+
+
+
+
+
+
+
+
         ########################################################################
-        #                           END OF YOUR CODE                           
+        #                           END OF YOUR CODE
         ########################################################################
-        return rbf_kernel
+        return matern_kernel
+
+    def exp_kernel(self, X1, X2):
+        """Exponential kernel.
+
+        Inputs:
+            X1, X2 (np.ndarray): Input arrays.
+
+        Returns:
+            np.ndarray: Kernel matrix.
+        """
+        ########################################################################
+        # Task 1.1
+        # TODO:
+        # 1. Define distance measure
+        # 2. Implement exponential kernel function
+        # Hints:
+        # 1. Use cdist from scipy.spatial.distance to compute the distance
+        ########################################################################
+        length_scale = self.kernel_params.get("length_scale", 1.0)
+        
+
+
+
+
+        ########################################################################
+        #                           END OF YOUR CODE
+        ########################################################################
+        return exp_kernel
 
     def fit(self, X, y):
-        """Fit the Gaussian Process model."""
+        """Fit the Gaussian Process model.
+
+        Inputs:
+            X (np.ndarray): Training inputs.
+            y (np.ndarray): Training targets.
+        """
+        assert isinstance(X, np.ndarray) and isinstance(y, np.ndarray), "X and y must be numpy arrays."
         self.X_train = X
         self.y_train = y
-        self.K = self.kernel(X, X)
-        self.L = np.linalg.cholesky(self.K + self.noise * np.eye(len(X)))
-        self.alpha = np.linalg.solve(self.L.T, np.linalg.solve(self.L, y))
-
-    def predict(self, X_test, return_std=False):
-        """Make predictions with uncertainty estimates."""
-        ########################################################################
-        # Task 1.2                                                             
-        # TODO:                                                                
-        # 1. Calculate K_star, the kernel between X_test and self.X_train      
-        # 2. Use self.alpha to compute the mean prediction                     
-        # 3. If return_std is True, compute the standard deviation using K_star
-        # and self.L, and return both mean and std. Otherwise, mean will be    
-        # returned by default.                                                 
-        ########################################################################
-        
-
-
-
-
-
-
-
-
-
-
-        ########################################################################
-        #                           END OF YOUR CODE                           
-        ########################################################################
-        return mean
-
-
-class MultiOutputGaussianProcess:
-    def __init__(self, kernel: str = "rbf", length_scale: float = 1.0, noise: float = 1e-8):
-        self.kernel = kernel  # Not used in this implementation, but kept for interface consistency
-        self.length_scale = length_scale
-        self.noise = noise
-        self.X_train = None
-        self.y_train = None
-        self.output_dim = None
-        self.models = []  # Will store alpha values for each output dimension
-
-    def rbf_kernel(self, X1, X2):
-        """Radial Basis Function (RBF) kernel."""
-        ########################################################################
-        # Task 1.1                                                              
-        # TODO:                                                                
-        # 1. Define distance measure                                           
-        # 2. Define rbf_kernel                                                 
-        # Hints:                                                               
-        # 1. Use cdist from scipy.spatial.distance to compute the distance     
-        ########################################################################
-        
-
-
-
-
-
-
-        ########################################################################
-        #                           END OF YOUR CODE                           
-        ########################################################################
-        return rbf_kernel
-
-    def fit(self, X, y):
-        """Fit the Gaussian Process model with multi-dimensional outputs."""
-        self.X_train = X
-        self.y_train = y
-
-        # Handle both 1D and multi-dimensional outputs
         if len(y.shape) == 1:
-            self.y_train = y.reshape(-1, 1)
+            y = y.reshape(-1, 1)
+        self.output_dim = y.shape[1]
 
-        self.output_dim = self.y_train.shape[1]
-
-        # Compute kernel matrix once (shared across all output dimensions)
-        self.K = self.rbf_kernel(X, X)
-        self.L = np.linalg.cholesky(self.K + self.noise * np.eye(len(X)))
-
-        # Compute alpha for each output dimension
-        self.alphas = np.zeros((len(X), self.output_dim))
-        for i in range(self.output_dim):
-            self.alphas[:, i] = np.linalg.solve(
-                self.L.T, np.linalg.solve(self.L, self.y_train[:, i])
-            )
-
-    def predict(self, X_test, return_std=False):
-        """Make predictions with uncertainty estimates for each output dimension."""
+        if self.max_samples and X.shape[0] > self.max_samples:
+            idx = np.random.choice(X.shape[0], self.max_samples, replace=False)
+            X = X[idx]
+            y = y[idx]
         ########################################################################
-        # Task 1.2                                                             
-        # TODO:                                                                
-        # 1. Calculate K_star, the kernel between X_test and X_train           
-        # 2. Use self.alphas to compute the mean prediction                    
+        # Task 1.2
+        # TODO:
+        # 1. Compute K, the kernel matrix
+        # 2. Compute L, the Cholesky decomposition, using np.linalg.cholesky and noise for regularization
+        # 3. Compute alphas, the dual coefficients or weight vectors alphas for prediction
+        # Hints:
+        # 1. For multi-output, compute alphas for each output
+        ########################################################################
+        # Show relevant variables
+        noise = self.noise  
+        kernel = self.kernel
+        output_dim = self.output_dim
+        self.K, self.L, self.alphas = None, None, None  # Compute those
+        ########################################################################
+
+        
+
+
+
+
+
+
+
+        ########################################################################
+        #                           END OF YOUR CODE
+        ########################################################################
+        self.K, self.L, self.alphas = K, L, alphas  # To show relevant variables
+
+    def predict(self, X_test, return_std=False) -> Union[np.ndarray, Tuple[np.ndarray, np.ndarray]]:
+        """Make predictions with uncertainty estimates. Assumes uncorrelated outputs.
+
+        Inputs:
+            X_test (np.ndarray): Test inputs.
+            return_std (bool): If True, return standard deviation along with mean.
+
+        Returns:
+            mean (np.ndarray): Mean predictions.
+            std (np.ndarray, optional): Standard deviations.
+        """
+        ########################################################################
+        # Task 1.2
+        # TODO:
+        # 1. Calculate K_star, the kernel between X_test and X_train
+        # 2. Use the dual coefficents alphas to compute the mean prediction
         # 3. If return_std is True, compute the standard deviation using K_star
-        # and self.L, and return both mean and std. Otherwise, mean will be    
-        # returned by default.                                                 
+        #    and L, and return both mean and std. Otherwise, mean will be
+        #    returned by default.
+        ########################################################################
+        # Show relevant variables
+        L = self.L  
+        X_train = self.X_train 
+        alphas = self.alphas 
+        kernel = self.kernel 
+        output_dim = self.output_dim
+        mean, std = None, None  # Compute those
         ########################################################################
         
 
@@ -170,53 +301,83 @@ class MultiOutputGaussianProcess:
 
 
 
-
-
-
-
-
-
-
         ########################################################################
-        #                           END OF YOUR CODE                           
+        #                           END OF YOUR CODE
         ########################################################################
         return mean
+
+
+# Single-output GP is just a special case of BaseGaussianProcess
+class GaussianProcess(BaseGaussianProcess):
+    pass
+
+
+# MultiOutputGaussianProcess is now identical to BaseGaussianProcess
+class MultiOutputGaussianProcess(BaseGaussianProcess):
+    pass
 
 
 class IndependentMultitaskSVGPModel(gpy.models.ApproximateGP):
     def __init__(self, X_train, num_tasks, num_inducing_points):
-        # We select different inducing points for each task by randomly selecting them from the training data
-        # print("Shape of X_train:", X_train.shape)
-        num_features = X_train[0].shape[-1]
-        inducing_points = torch.zeros(num_tasks, num_inducing_points, num_features)
-        print("Inducing points shape:", inducing_points.shape)
-        for i in range(num_tasks):
-            random_indices = torch.randperm(X_train.shape[0])[:num_inducing_points]
-            # print("Random indices:", random_indices)
-            inducing_points[i, :, :] = X_train[random_indices, :]
-            # print("Inducing points for task", i, ":", inducing_points[i, :, :])
-        # We have to mark the CholeskyVariationalDistribution as batch
-        # so that we learn a variational distribution for each task
-        variational_distribution = gpy.variational.CholeskyVariationalDistribution(
-            inducing_points.size(-2), batch_shape=torch.Size([num_tasks])
-        )
+        # Select inducing point for each task
+        num_inducing_points = min(num_inducing_points, X_train.shape[0])
+        inducing_points = torch.stack(
+            [select_inducing_points(X_train, num_inducing_points, mode="kmeans", seed=i) for i in range(num_tasks)],
+            dim=0,
+        )  # (num_tasks, num_inducing_points, num_features)
+        batch_shape = torch.Size([num_tasks])
 
-        variational_strategy = gpy.variational.IndependentMultitaskVariationalStrategy(
-            gpy.variational.VariationalStrategy(
-                self, inducing_points, variational_distribution, learn_inducing_locations=True
-            ),
-            num_tasks=num_tasks,
-        )
+        #######################################################################
+        # Task 5.1
+        # TODO:
+        # 1. Define a CholeskyVariationalDistribution for each task (batch shape).
+        # 2. Wrap it in an IndependentMultitaskVariationalStrategy.
+        #######################################################################
+        learn_inducing_locations = True  # To show relevant parameter
+        variational_distribution, variational_strategy = None, None  # Define those  
+        #######################################################################
+        
+
+
+
+
+
+
+
+
+
+
+
+        #######################################################################
+        #                        END OF YOUR CODE
+        #######################################################################
+
+        self.var_distribution_type =variational_distribution.__class__  # For testing purposes
+        self.var_strategy_type = variational_strategy.__class__  # For testing purposes
 
         super().__init__(variational_strategy)
 
-        # The mean and covariance modules should be marked as batch
-        # so we learn a different set of hyperparameters
-        self.mean_module = gpy.means.ConstantMean(batch_shape=torch.Size([num_tasks]))
-        self.covar_module = gpy.kernels.ScaleKernel(
-            gpy.kernels.RBFKernel(batch_shape=torch.Size([num_tasks])),
-            batch_shape=torch.Size([num_tasks]),
-        )
+        #######################################################################
+        # Task 5.2
+        # TODO:
+        # 1. Define the mean and covariance modules
+        # Hints:
+        # 1. Use ConstantMean and ScaleKernel with RBFKernel
+        #######################################################################
+        batch_shape = batch_shape # To show relevant parameter
+        mean_module = None
+        covar_module = None
+        #######################################################################
+        
+
+
+
+
+
+        #######################################################################
+        #                        END OF YOUR CODE
+        #######################################################################
+        self.mean_module, self.covar_module = mean_module, covar_module
 
     def forward(self, x):
         # The forward function should be written as if we were dealing with each output
@@ -227,7 +388,14 @@ class IndependentMultitaskSVGPModel(gpy.models.ApproximateGP):
 
 
 class SVGPTrainer:
-    def __init__(self, X_train, y_train, device):
+    def __init__(
+        self,
+        X_train: Union[np.ndarray, torch.Tensor],
+        y_train: Union[np.ndarray, torch.Tensor],
+        device,
+        inducing_points_per_task: Optional[int] = 30,
+        max_total_inducing_points: Optional[int] = 500,
+    ):
         if device == "cuda":
             self.device = "cuda" if torch.cuda.is_available() else "cpu"
             self.cuda = True
@@ -235,24 +403,21 @@ class SVGPTrainer:
             self.device = "cpu"
             self.cuda = False
 
-        if isinstance(X_train, np.ndarray):
-            self.X_train = torch.FloatTensor(X_train).to(self.device)
-        else:
-            self.X_train = X_train.to(self.device)
-        if isinstance(y_train, np.ndarray):
-            self.y_train = torch.FloatTensor(y_train).to(self.device)
-        else:
-            self.y_train = y_train.to(self.device)
+        self.X_train = to_torch(X_train, device=self.device, dtype=torch.float32)
+        self.y_train = to_torch(y_train, device=self.device, dtype=torch.float32)
 
         num_tasks = y_train.shape[1]
-        num_inducing_points = int(500 // num_tasks)
+        num_inducing_points = min(
+            y_train.shape[0], inducing_points_per_task, int(max_total_inducing_points // num_tasks)
+        )
+
         self.model = IndependentMultitaskSVGPModel(self.X_train, num_tasks, num_inducing_points)
         self.likelihood = gpy.likelihoods.MultitaskGaussianLikelihood(num_tasks=num_tasks)
         if self.cuda:
             self.model = self.model.cuda()
             self.likelihood = self.likelihood.cuda()
 
-    def train(self, epochs=30, lr=0.1, batch_size=128):
+    def train(self, epochs=30, lr=0.1, batch_size=128, log_interval=5):
         self.model.train()
         self.likelihood.train()
         params = [{"params": self.model.parameters()}, {"params": self.likelihood.parameters()}]
@@ -271,178 +436,27 @@ class SVGPTrainer:
                 loss.backward()
                 optimizer.step()
                 loss_epoch += loss.item()
-            print(f"Iter {i + 1}/{epochs} - Loss: {loss_epoch / len(train_loader)}")
+            if (i + 1) % log_interval == 0 or i == 0 or i == epochs - 1:
+                print(f"Iter {i + 1}/{epochs} - Loss: {loss_epoch / len(train_loader):.4f}")
         self.training_time = time.time() - start_time
 
-    def infer(self, X_test):
-        if isinstance(X_test, np.ndarray):
-            X_test = torch.FloatTensor(X_test).to(self.device)
-        else:
-            X_test = X_test.to(self.device)
+    def infer(self, X_test: Union[np.ndarray, torch.Tensor], return_std=True, return_ci=False) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        X_test = to_torch(X_test, device=self.device, dtype=torch.float32)
 
         self.model.eval()
         self.likelihood.eval()
         start_time = time.time()
         with torch.no_grad(), gpy.settings.fast_pred_var():
-            pred = self.likelihood(self.model(X_test))
-            self.inference_time = time.time() - start_time
-            mean = pred.mean.cpu().numpy()
-            std = pred.variance.sqrt().cpu().numpy()
-            lower, upper = pred.confidence_region()
-        return mean, std, lower.cpu().numpy(), upper.cpu().numpy()
-
-
-class ExactGPModel(gpy.models.ExactGP):
-    def __init__(self, train_x, train_y, likelihood):
-        super().__init__(train_x, train_y, likelihood)
-        self.mean_module = gpy.means.ConstantMean()
-        self.covar_module = gpy.kernels.ScaleKernel(gpy.kernels.RBFKernel())
-
-    def forward(self, x):
-        mean_x = self.mean_module(x)
-        covar_x = self.covar_module(x)
-        return gpy.distributions.MultivariateNormal(mean_x, covar_x)
-
-
-class MultioutputGP(gpy.models.ExactGP):
-    def __init__(self, train_x, train_y, likelihood, num_outputs):
-        super().__init__(train_x, train_y, likelihood)
-        batch_shape = torch.Size([num_outputs])
-        self.mean_module = gpy.means.ConstantMean(batch_shape=batch_shape)
-        self.covar_module = gpy.kernels.ScaleKernel(
-            gpy.kernels.RBFKernel(batch_shape=batch_shape), batch_shape=batch_shape
-        )
-
-    def forward(self, x):
-        mean_x = self.mean_module(x)
-        covar_x = self.covar_module(x)
-        return gpy.distributions.MultitaskMultivariateNormal.from_batch_mvn(
-            gpy.distributions.MultivariateNormal(mean_x, covar_x)
-        )
-
-
-class GPTrainer:
-    def __init__(self, X_train, y_train, device="cpu", lr=0.003, train_iter=30, prior_noise=1e-4):
-        self.lr = lr
-        self.num_outputs = y_train.shape[1]
-        self.train_iter = train_iter
-
-        if device == "cuda":
-            self.device = "cuda" if torch.cuda.is_available() else "cpu"
+            pred: gpy.likelihoods.MultitaskGaussianLikelihood = self.likelihood(self.model(X_test))
+        self.inference_time = time.time() - start_time
+        mean = pred.mean.cpu().numpy()
+        std = pred.variance.sqrt().cpu().numpy()
+        lower, upper = pred.confidence_region()
+        if return_std and return_ci:
+            return mean, std, lower.cpu().numpy(), upper.cpu().numpy()
+        elif return_std:
+            return mean, std
+        elif return_ci:
+            return mean, lower.cpu().numpy(), upper.cpu().numpy()
         else:
-            self.device = "cpu"
-        self.X_train = X_train.to(self.device)
-        self.y_train = y_train.to(self.device)
-
-        # self.X_train = torch.FloatTensor(X_train)
-        # self.y_train = torch.FloatTensor(y_train)
-        # Initialize noise prior, likelihood, and model
-
-        likelihood = gpy.likelihoods.MultitaskGaussianLikelihood(num_tasks=self.num_outputs)
-        model = MultioutputGP(self.X_train, self.y_train, likelihood, self.num_outputs)
-
-        if self.device == "cuda":
-            self.model = model.cuda()
-            self.likelihood = likelihood.cuda()
-        else:
-            self.model = model.cpu()
-            self.likelihood = likelihood.cpu()
-
-    def train(self):
-        self.model.train()
-        self.likelihood.train()
-        # Initialize optimizer and loss
-        optimizer = torch.optim.Adam(self.model.parameters(), lr=self.lr)
-        mll = gpy.mlls.ExactMarginalLogLikelihood(self.likelihood, self.model)
-        print("Training model...")
-        print("Using device:", self.device)
-        # train_loader = CustomDataset(self.X_train, self.y_train, batch_size=64, shuffle=True)
-        # batch_size = 64
-        # n_iter = len(self.X_train) // batch_size
-        X = self.X_train
-        y = self.y_train
-        start_time = time.time()
-        for i in range(self.train_iter):
-            loss_epoch = 0
-            # for j in range(n_iter):
-            #     X = self.X_train[j * batch_size : (j + 1) * batch_size]
-            #     y = self.y_train[j * batch_size : (j + 1) * batch_size]
-            optimizer.zero_grad()
-            output = self.model(X)
-            loss = -mll(output, y)
-            loss.backward()
-            optimizer.step()
-            loss_epoch += loss.item()
-            print("Iter %d/%d - Loss: %.3f" % (i + 1, self.train_iter, loss_epoch))
-        self.training_time = time.time() - start_time
-
-    def infer(self, X_test):
-        test_x = X_test.to(self.device)
-        self.model.eval()
-        self.likelihood.eval()
-        with torch.no_grad(), gpy.settings.fast_pred_var():
-            start_time = time.time()
-            pred = self.likelihood(self.model(test_x))
-            self.inference_time = time.time() - start_time
-            std = pred.variance.sqrt().cpu().numpy()
-            mean = pred.mean.cpu().numpy()
-        return mean, std
-
-
-class GPListTrainer:
-    def __init__(self, X_train, y_train, lr=0.003, train_iter=30, prior_noise=1e-4):
-        self.output_dim = y_train.shape[1]
-        self.train_iter = train_iter
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-        self.device = device
-        self.X_train = torch.FloatTensor(X_train)  # .to(device)
-        self.y_train = torch.FloatTensor(y_train)  # .to(device)
-        self.models = []
-        self.likelihoods = []
-        for i in range(self.output_dim):
-            likelihood = gpy.likelihoods.GaussianLikelihood()
-            model = ExactGPModel(self.X_train, self.y_train[:, i], likelihood)
-            self.models.append(model)
-            self.likelihoods.append(likelihood)
-        self.model = gpy.models.IndependentModelList(*self.models)
-        self.likelihood = gpy.likelihoods.LikelihoodList(*self.likelihoods)
-        self.loss = gpy.mlls.SumMarginalLogLikelihood(self.likelihood, self.model)
-        self.optimizer = torch.optim.Adam(self.model.parameters(), lr=lr)
-
-    def train(self):
-        start_time = time.time()
-        self.model.train()
-        self.likelihood.train()
-        for i in range(self.train_iter):
-            print("Iter %d/%d" % (i + 1, self.train_iter))
-            self.optimizer.zero_grad()
-            output = self.model(*self.model.train_inputs)
-            loss = -self.loss(output, self.model.train_targets)
-            loss.backward()
-            print("Iter %d/%d - Loss: %.3f" % (i + 1, self.train_iter, loss.item()))
-            self.optimizer.step()
-            print("End of iteration")
-        self.training_time = time.time() - start_time
-
-    def infer(self, X_test):
-        test_x_all = []
-        test_x = torch.FloatTensor(X_test)  # .to(self.device)
-        for i in range(self.output_dim):
-            test_x_all.append(test_x)
-        test_x = test_x_all
-        self.model.eval()
-        self.likelihood.eval()
-        with torch.no_grad(), gpy.settings.fast_pred_var():
-            start_time = time.time()
-            predictions = self.likelihood(*self.model(*test_x))
-            self.inference_time = time.time() - start_time
-        means = []
-        stds = []
-        for prediction in predictions:
-            std = prediction.stddev.detach().numpy()
-            mean = prediction.mean.detach().numpy()
-            means.append(mean)
-            stds.append(std)
-        means = np.array(means).T
-        stds = np.array(stds).T
-        return means, stds
+            return mean,

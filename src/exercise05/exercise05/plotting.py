@@ -6,6 +6,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.ticker import FormatStrFormatter
 
+state_names = ["x", "y", "z", "roll", "pitch", "yaw", "dx", "dy", "dz", "droll", "dpitch", "dyaw"]
+
 
 def get_runtime(test_runs, train_runs):
     """Get the mean, std, and max runtime."""
@@ -44,11 +46,7 @@ def plot_runtime(runtime, num_points_per_epoch, save_dir: Path):
     # num_train_samples = runtime['num_train_samples']
     plt.plot(num_points_per_epoch, mean_runtime, label="mean")
     plt.fill_between(
-        num_points_per_epoch,
-        mean_runtime - std_runtime,
-        mean_runtime + std_runtime,
-        alpha=0.3,
-        label="1-std",
+        num_points_per_epoch, mean_runtime - std_runtime, mean_runtime + std_runtime, alpha=0.3, label="1-std"
     )
     plt.plot(num_points_per_epoch, max_runtime, label="max", color="r")
     plt.legend()
@@ -62,14 +60,10 @@ def plot_runtime(runtime, num_points_per_epoch, save_dir: Path):
         plt.cla()
         plt.clf()
         data = np.vstack((num_points_per_epoch, mean_runtime, std_runtime, max_runtime)).T
-        np.savetxt(
-            save_dir / "runtime.csv", data, delimiter=",", header="Train Steps, Mean, Std, Max"
-        )
+        np.savetxt(save_dir / "runtime.csv", data, delimiter=",", header="Train Steps, Mean, Std, Max")
 
 
-def plot_runs(
-    all_runs, num_epochs, ind=0, ylabel="x position", save_dir: Path | None = None, traj=None
-):
+def plot_runs(all_runs, num_epochs, ind=0, ylabel="x position", save_dir: Path | None = None, traj=None):
     # plot the reference trajectory
     if traj is not None:
         plt.plot(traj[:, ind], label="Reference", color="gray", linestyle="--")
@@ -121,6 +115,26 @@ def plot_learning_curve(avg_rewards, num_points_per_epoch, stem, save_dir: Path)
     plt.clf()
     data = np.vstack((samples, rewards)).T
     np.savetxt(save_dir / (stem + ".csv"), data, delimiter=",", header="Train steps,Cost")
+
+
+def plot_trajectory(runs, traj, first_label="Prior MPC", second_label="GP-MPC"):
+    num_steps = runs[0]["obs"].shape[0]
+    # trim the traj steps to mach the evaluation steps
+    traj = traj[0:num_steps, :]
+    num_epochs = len(runs)
+
+    _ = plt.figure(figsize=(10, 6))
+
+    # x-z plane
+    idx = [0, 2]
+    plt.plot(traj[idx[0], :], traj[idx[1], :], label="Reference", color="gray", linestyle="-")
+    plt.plot(runs[0]["obs"][:, idx[0]], runs[0]["obs"][:, idx[1]], label=f"{first_label}")
+    for epoch in range(1, num_epochs):
+        plt.plot(runs[epoch]["obs"][:, idx[0]], runs[epoch]["obs"][:, idx[1]], label=f"{second_label} epoch %s" % epoch)
+    plt.title("X-Z plane path")
+    plt.xlabel("X [m]")
+    plt.ylabel("Z [m]")
+    plt.legend()
 
 
 def plot_xyz_trajectory(runs, ref, save_dir: Path):
@@ -190,9 +204,7 @@ def make_quad_plots(test_runs, train_runs, trajectory, save_dir, show=True):
     num_points_per_epoch = []
     plot_xyz_trajectory(test_runs, trajectory, fig_dir)
     for ind in range(nx):
-        plot_runs(
-            test_runs, num_epochs, ind=ind, ylabel=f"x{ind}", save_dir=fig_dir, traj=trajectory
-        )
+        plot_runs(test_runs, num_epochs, ind=ind, ylabel=f"x{ind}", save_dir=fig_dir, traj=trajectory)
     for ind in range(nu):
         plot_runs_input(test_runs, num_epochs, ind=ind, ylabel=f"u{ind}", save_dir=fig_dir)
     num_points = 0
@@ -214,20 +226,7 @@ def plot_quad_eval(trajectories, reference, dt: float, save_path: Path):
     plot_length = np.min([np.shape(input_stack)[0], np.shape(state_stack)[0]])
     times = np.linspace(0, dt * plot_length, plot_length)
 
-    state_labels = [
-        "x",
-        "d_x",
-        "y",
-        "d_y",
-        "z",
-        "d_z",
-        "phi",
-        "theta",
-        "psi",
-        "d_phi",
-        "d_theta",
-        "d_psi",
-    ]
+    state_labels = ["x", "d_x", "y", "d_y", "z", "d_z", "phi", "theta", "psi", "d_phi", "d_theta", "d_psi"]
     assert len(state_labels) == nx
 
     # Plot states

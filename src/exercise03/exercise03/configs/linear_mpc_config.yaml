@@ -18,7 +18,7 @@ cost:
 solver:
 
   export_dir: "acados_c_code/MPC/c_generated_code"
-  n_pred: 100           # prediction horizon
+  n_pred: 20           # prediction horizon
   Ts: 0.05            # sampling time [s]  
 
   nlp_solver_type: 'SQP'      # 'SQP_RTI'  

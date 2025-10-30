@@ -1,8 +1,22 @@
 import random
 
-import matplotlib.pyplot as plt
 import numpy as np
 import torch
+from sklearn.cluster import KMeans
+
+
+def to_torch(x, device="cpu", dtype=None):
+    if isinstance(x, torch.Tensor):
+        if dtype is not None:
+            x = x.to(device=device, dtype=dtype)
+        else:
+            x = x.to(device=device)
+    else:
+        if dtype is not None:
+            x = torch.tensor(x, device=device, dtype=dtype)
+        else:
+            x = torch.tensor(x, device=device)
+    return x
 
 
 def set_seed(seed: int = 42):
@@ -12,6 +26,39 @@ def set_seed(seed: int = 42):
     random.seed(seed)
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
+
+
+def select_inducing_points(X_train, num_inducing_points, mode="rnd", kmeans_random_state=0, seed: int = None):
+    """Select inducing points from training data for variational inference.
+
+    Args:
+        X_train (torch.Tensor or np.ndarray): Training data of shape (N, D).
+        num_inducing_points (int): Number of inducing points to select.
+        mode (str): Selection mode, "rnd" for random, "kmeans" for k-means clustering.
+        kmeans_random_state (int): Random seed for reproducibility.
+        seed (int): Random seed for reproducibility.
+
+    Returns:
+        torch.Tensor: Inducing points of shape (num_inducing_points, D).
+    """
+    if seed is not None:
+        set_seed(seed)
+
+    if isinstance(X_train, np.ndarray):
+        X = torch.from_numpy(X_train)
+    else:
+        X = X_train
+
+    if mode == "rnd":
+        indices = torch.randperm(X.shape[0])[:num_inducing_points]
+        inducing_points = X[indices]
+    elif mode == "kmeans":
+        kmeans = KMeans(n_clusters=num_inducing_points, random_state=kmeans_random_state)
+        centers = kmeans.fit(X.cpu().numpy()).cluster_centers_
+        inducing_points = torch.tensor(centers, dtype=X.dtype, device=X.device)
+    else:
+        raise ValueError("Mode must be 'rnd' or 'kmeans'.")
+    return inducing_points
 
 
 class Normalizer:
@@ -74,18 +121,26 @@ class CustomDataset:
         self.n_samples = len(X)
 
     def __len__(self):
+        # Return the number of batches
         return (self.n_samples + self.batch_size - 1) // self.batch_size
 
     def __iter__(self):
         ########################################################################
-        # Task 2                                                               
-        # TODO:                                                                
-        # 1. If shuffle is True, randomly permute self.X and self.y            
-        # 2. Create batches of batch_size = self.batch_size                    
-        # Hints:                                                               
-        # 1. Use the yield keyword to return batches of X and y                
-        # 2. If you have troubles, check the docs for iterable datasets:       
-        # https://docs.pytorch.org/docs/stable/data.html#torch.utils.data.IterableDataset                                                        
+        # Task 2
+        # TODO:
+        # 1. If shuffle is True, randomly permute self.X and self.y
+        # 2. Create batches of batch_size = self.batch_size
+        # Hints:
+        # 1. Use the yield keyword to return batches of X and y
+        # 2. If you have troubles, check the docs for iterable datasets:
+        # https://docs.pytorch.org/docs/stable/data.html#torch.utils.data.IterableDataset
+        ########################################################################
+        # Show relevant variables
+        shuffle = self.shuffle
+        n_samples = self.n_samples
+        batch_size = self.batch_size
+        X = self.X
+        y = self.y
         ########################################################################
         
 
@@ -101,7 +156,7 @@ class CustomDataset:
 
         pass
         ########################################################################
-        #                           END OF YOUR CODE                           
+        #                           END OF YOUR CODE
         ########################################################################
 
 
@@ -119,41 +174,6 @@ def generate_synthetic_data(n_samples=100, noise_level=0.1, seed=0):
     return X, y
 
 
-def plot_regression_results(X, y, model_predictions, model_std=None, title="Regression Results"):
-    """Plot the regression results with optional uncertainty."""
-    plt.figure(figsize=(10, 6))
-    plt.scatter(X, y, color="blue", alpha=0.5, label="Data points")
-    plt.plot(X, model_predictions, color="red", label="Model prediction")
-
-    if model_std is not None:
-        plt.fill_between(
-            X.flatten(),
-            model_predictions - 2 * model_std,
-            model_predictions + 2 * model_std,
-            color="red",
-            alpha=0.2,
-            label="95% confidence interval",
-        )
-
-    plt.title(title)
-    plt.xlabel("X")
-    plt.ylabel("y")
-    plt.legend()
-    plt.grid(True)
-    plt.show()
-
-
-def plot_learning_curves(train_losses):
-    plt.figure(figsize=(10, 6))
-    plt.plot(train_losses, label="Training Loss")
-    plt.title("Learning Curve")
-    plt.xlabel("Epoch")
-    plt.ylabel("Loss")
-    plt.legend()
-    plt.grid(True)
-    plt.show()
-
-
 def train_test_split(X, y, test_size):
     from sklearn.model_selection import train_test_split
 
@@ -162,7 +182,7 @@ def train_test_split(X, y, test_size):
     return X_train, X_test, y_train, y_test
 
 
-def error_statistics(y_true, y_pred, y_std, model_name="GP") -> tuple:
+def error_statistics(y_true, y_pred, y_std, model_name="GP", show: bool = False) -> tuple:
     """Compute and print error statistics for regression results.
 
     Args:
@@ -170,6 +190,7 @@ def error_statistics(y_true, y_pred, y_std, model_name="GP") -> tuple:
         y_pred (np.ndarray): Predicted target values.
         y_std (np.ndarray): Predicted standard deviations (uncertainty).
         model_name (str): Name of the model (default: "GP").
+        show (bool): Whether to print the results.
 
     Returns:
         tuple: (overall_mae, overall_rmse, overall_uncertainty)
@@ -189,7 +210,8 @@ def error_statistics(y_true, y_pred, y_std, model_name="GP") -> tuple:
     overall_rmse = np.mean(rmse)
 
     # Print results
-    print(f"{model_name} results:")
-    print(f"Mean Absolute Error: {overall_mae:.4f}")
-    print(f"Root Mean Square Error: {overall_rmse:.4f}")
+    if show:
+        print(f"{model_name} results:")
+        print(f"Mean Absolute Error: {overall_mae:.4f}")
+        print(f"Root Mean Square Error: {overall_rmse:.4f}")
     return overall_mae, overall_rmse, overall_uncertainty

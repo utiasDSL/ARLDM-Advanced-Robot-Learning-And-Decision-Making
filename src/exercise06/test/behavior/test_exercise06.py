@@ -7,8 +7,11 @@ from pathlib import Path
 
 import gymnasium
 import numpy as np
+import pytest
 import torch
-from exercise06.ppo import PPOTrainer, make_envs, save_model, set_seeds
+from exercise06.ppo import PPOTester, PPOTrainer, make_envs, save_model, set_seeds
+from exercise06.rand_traj_env import RandTrajEnv
+from exercise06.wrappers import AngleReward, FlattenJaxObservation
 
 sys.path.append(
     os.path.abspath(os.path.dirname(__file__))
@@ -21,9 +24,11 @@ except ModuleNotFoundError:
         compare_dicts,  # required for importing utils_test in development repository
     )
 
+module_path = sys.modules["exercise06"].__file__
+import_prefix = f"{os.path.dirname(module_path)}/" if module_path is not None else ""
+
 RTOL = 1e-3
 ATOL = 1e-4
-
 
 def load_test_data():
     """Load precomputed test data from a pickle file."""
@@ -68,14 +73,46 @@ class TestSetSeed(unittest.TestCase):
 
 class TestMakeEnvs(unittest.TestCase):
     def test_make_envs(self):
-        train_envs, eval_envs = make_envs(2, 2, "cpu")
-        assert isinstance(
-            train_envs, gymnasium.wrappers.vector.JaxToTorch
-        ), "train_envs is not wrapped correctly"
+        """Test that make_envs() constructs environments with correct wrapper hierarchy."""
+        train_envs, eval_envs = make_envs("DroneFigureEightTrajectory-v0", 2, 2, "cpu")
 
-        assert isinstance(
-            eval_envs, gymnasium.wrappers.vector.JaxToTorch
-        ), "eval_envs is not wrapped correctly"
+        # Check top-level wrapper
+        self.assertIsInstance(
+            train_envs, gymnasium.wrappers.vector.JaxToTorch, 
+            "train_envs should be wrapped with JaxToTorch"
+        )
+        self.assertIsInstance(
+            eval_envs, gymnasium.wrappers.vector.JaxToTorch, 
+            "eval_envs should be wrapped with JaxToTorch"
+        )
+
+        # Unwrap JaxToTorch
+        train_envs_lvl1 = train_envs.env
+        eval_envs_lvl1 = eval_envs.env
+
+        # Check FlattenJaxObservation
+        self.assertIsInstance(
+            train_envs_lvl1, FlattenJaxObservation,
+            "train_envs inner env should be FlattenJaxObservation"
+        )
+        self.assertIsInstance(
+            eval_envs_lvl1, FlattenJaxObservation,
+            "eval_envs inner env should be FlattenJaxObservation"
+        )
+
+        # Unwrap FlattenJaxObservation
+        train_envs_lvl2 = train_envs_lvl1.env
+        eval_envs_lvl2 = eval_envs_lvl1.env
+
+        # Check AngleReward
+        self.assertIsInstance(
+            train_envs_lvl2, AngleReward,
+            "train_envs inner env should be AngleReward"
+        )
+        self.assertIsInstance(
+            eval_envs_lvl2, AngleReward,
+            "eval_envs inner env should be AngleReward"
+        )
         
 
 class TestSaveModel(unittest.TestCase):
@@ -85,7 +122,7 @@ class TestSaveModel(unittest.TestCase):
         set_seeds(seed)  #
         self.agent = torch.nn.Linear(10, 2)
         self.optimizer = torch.optim.Adam(self.agent.parameters(), lr=0.001)
-        self.train_envs, _ = make_envs(2, 2, "cpu")
+        self.train_envs, _ = make_envs("DroneFigureEightTrajectory-v0", 2, 2, "cpu")
 
     def test_save_model(self):
         dict_ = save_model(
@@ -187,4 +224,40 @@ class TestCalculateVLoss(unittest.TestCase):
             atol=ATOL,
             rtol=RTOL,
             msg=f"Clipped v_loss incorrect. Expected: {expected_v_loss_clipped}, Got: {v_loss_clipped}",
+        )
+
+class TestRandTrajEnv(unittest.TestCase):
+    def setUp(self):
+        """Create RandTrajEnv instance."""
+        self.student_env = RandTrajEnv()
+
+    def test_trajectory_attr_existance(self):
+        """Test whether RandTrajEnv has either 'trajectory' or 'trajectories' attribute."""
+        # Check if either 'trajectory' or 'trajectories' attribute exists
+        has_trajectory = hasattr(self.student_env, "trajectory")
+        has_trajectories = hasattr(self.student_env, "trajectories")
+
+        # At least one of them must exist
+        self.assertTrue(
+            has_trajectory or has_trajectories,
+            "RandTrajEnv must have at least one attribute: 'trajectory' or 'trajectories'.",
+        )
+
+class TestFinalPolicyPublic(unittest.TestCase):
+    def setUp(self):
+        """Load precomputed test data."""
+        self.test_data = load_test_data()
+        # Load saved sample trajectory
+        self.example_trajectory = self.test_data["random_trajectories"]["example_trajectory"]
+
+    @pytest.mark.timeout(80)
+    def test_policy_reach_pos(self):
+        env_name="DroneReachPos-v0"
+        ckpt_path = import_prefix + f"ppo_checkpoint_{env_name}.pt"
+        reward, _ = PPOTester(seed=42, ckpt_path=ckpt_path, n_episodes=5, env_name=env_name)
+        # Check that reward for ReachPosEnv is over 380.
+        self.assertGreater(
+            reward,
+            380,
+            f"Your policy received a reward of {reward}, which is not good enough. You require at least 380 reward. The PPO learning parameters we provide should suffice to achieve that reward. However, you can still tweak them. Most likely though, something is wrong with your implementation!",
         )

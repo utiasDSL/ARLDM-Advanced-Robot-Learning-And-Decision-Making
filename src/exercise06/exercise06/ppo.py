@@ -2,7 +2,7 @@ import logging  # noqa: I001
 import random
 import time
 from pathlib import Path
-from typing import Optional, Tuple, Union
+from typing import Any, Optional, Tuple, Union
 
 import crazyflow  # noqa: F401, register the gymnasium envs
 import gymnasium
@@ -15,11 +15,10 @@ import wandb
 
 from crazyflow.utils import enable_cache
 from gymnasium.vector import VectorEnv
-from gymnasium.wrappers.vector import NormalizeObservation
 from ml_collections import ConfigDict
 from torch.optim import AdamW
 from exercise06.agent import Agent
-from exercise06.wrappers import FlattenJaxObservation, ZeroYaw
+from exercise06.wrappers import FlattenJaxObservation, AngleReward, RecordData
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -55,10 +54,13 @@ def set_seeds(seed: int):
     pass
 
 
-def make_envs(n_envs: int, n_eval_envs: int, train_device: str) -> tuple[VectorEnv, VectorEnv]:
+def make_envs(env_name: str, n_envs: int, n_eval_envs: int, train_device: str, **kwargs: dict[str, Any]) -> tuple[VectorEnv, VectorEnv]:
     """Creates vectorized training and evaluation environments for reinforcement learning.
 
     Args:
+        env_name : str
+            Name of environment.
+
         n_envs : int
             Number of parallel environments to use for training.
 
@@ -66,6 +68,10 @@ def make_envs(n_envs: int, n_eval_envs: int, train_device: str) -> tuple[VectorE
             Number of parallel environments to use for evaluation.
 
         train_device : str
+            Device used for training.
+        
+        **kwargs : dict
+            Extra keyword arguments to pass to `gymnasium.make_vec()`.
 
     Returns:
         train_envs : VectorEnv
@@ -77,28 +83,34 @@ def make_envs(n_envs: int, n_eval_envs: int, train_device: str) -> tuple[VectorE
     # cpu is faster for smaller number of parallel envs (~64)
     env_device = "cuda" if n_envs > 64 and torch.cuda.is_available() else "cpu"
     train_envs = gymnasium.make_vec(
-        "DroneFigureEightTrajectory-v0",
-        freq=50,
+        env_name,
         num_envs=n_envs,
+        freq=50,
         device=env_device,
+        **kwargs,
     )
     eval_envs = gymnasium.make_vec(
-        "DroneFigureEightTrajectory-v0",
-        freq=50,
+        env_name,
         num_envs=n_eval_envs,
+        freq=50,
         device=env_device,
+        **kwargs,
     )
 
-    train_envs = FlattenJaxObservation(ZeroYaw(train_envs))
     ########################################################################
     # TODO:
-    # Wrap the train_envs in an JaxToTorch wrapper (as our environment is
-    # implemented in Jax, but the DRL in PyTorch). You can use
-    # https://gymnasium.farama.org/api/vector/wrappers/#gymnasium.wrappers.vector.NormalizeObservation
-    # and                                                                      # https://gymnasium.farama.org/api/vector/wrappers/#gymnasium.wrappers.vector.JaxToTorch
+    # 1. Wrap the train_envs in an AngleReward wrapper. You can check the code 
+    # in wrappers.py. This is to penalize large roll, pitch, yaw angles.
+    # 2. Wrap the train_envs in an FlattenJaxObservation wrapper. This is to 
+    # transform dict type observations to flat array for the neural network.
+    # 3. Wrap the train_envs in an JaxToTorch wrapper (as our environment is
+    # implemented in Jax, but the DRL in PyTorch). You can use                                                                    
+    # https://gymnasium.farama.org/api/vector/wrappers/#gymnasium.wrappers.vector.JaxToTorch
     # Hint: set the device of the JaxToTorch wrapper to `train_device`.
     ########################################################################
     
+
+
 
 
 
@@ -108,19 +120,23 @@ def make_envs(n_envs: int, n_eval_envs: int, train_device: str) -> tuple[VectorE
     #                           END OF YOUR CODE
     ########################################################################
 
-    eval_envs = FlattenJaxObservation(ZeroYaw(eval_envs))
     ########################################################################
     # TODO:
-    # Wrap the eval_envs in an JaxToTorch wrapper (as our environment is
+    # 1. Wrap the eval_envs in an AngleReward wrapper. You can check the code 
+    # in wrappers.py. This is to penalize large roll, pitch, yaw angles.
+    # 2. Wrap the eval_envs in an FlattenJaxObservation wrapper. This is to 
+    # transform dict type observations to flat array for the neural network.
+    # 3. Wrap the eval_envs in an JaxToTorch wrapper (as our environment is
     # implemented in Jax, but the DRL in PyTorch). You can use
-    # https://gymnasium.farama.org/api/vector/wrappers/#gymnasium.wrappers.vector.NormalizeObservation
     # and
     # https://gymnasium.farama.org/api/vector/wrappers/#gymnasium.wrappers.vector.JaxToTorch
     # Hints:
     # - Set the device of the JaxToTorch wrapper to train_device.
     # NOTE: Normally, we would also wrap the eval_envs in a 
-    # NormalizeObservation wrapper, but for this environment we don't
-    # need to normalize the observations. Think about:
+    # NormalizeObservation wrapper. 
+    # https://gymnasium.farama.org/api/vector/wrappers/#gymnasium.wrappers.vector.NormalizeObservation
+    # However, we don't need to normalize the observations for this environment. 
+    # Think about:
     # - What is the purpose of the NormalizeObservation wrapper?
     # - Should the eval_envs update the normalization statistics of the
     #   NormalizeObservation wrapper?
@@ -131,39 +147,32 @@ def make_envs(n_envs: int, n_eval_envs: int, train_device: str) -> tuple[VectorE
 
 
 
+
+
     ########################################################################
     #                           END OF YOUR CODE
     ########################################################################
     return train_envs, eval_envs
 
-
-def unwrap_norm_env(env: VectorEnv) -> NormalizeObservation | None:
-    while hasattr(env, "env"):
-        if isinstance(env, NormalizeObservation):
-            return env
-        env = env.env
-
-
 def save_model(
-    agent: Agent,
+    agent: nn.Module,
     optimizer: torch.optim.Optimizer,
-    train_envs: VectorEnv,
+    train_envs: gymnasium.vector.VectorEnv,
     path: str,
     save: bool = True,
 ) -> dict[str, Optional[object]]:
     """Saves the model, optimizer state, and observation normalization statistics to a file. This is necessary for checkpointing and later inference or resuming training.
 
     Args:
-        agent : Agent
+        agent : nn.Module
             The PyTorch model whose parameters should be saved.
 
         optimizer : torch.optim.Optimizer
             The optimizer used during training whose state will be saved.
 
-        train_envs : VectorEnv
-            The vectorized training environments, used to extract observation
-            normalization statistics (mean and variance), if available.
-
+        train_envs: gymnasium.vector.VectorEnv
+            The environment for training this agent.
+            
         path : strs
             The file path where the checkpoint dictionary should be saved.
 
@@ -181,8 +190,6 @@ def save_model(
     save_dict = {
         "model_state_dict": None,
         "optim_state_dict": None,
-        "obs_mean": None,  # Normlization stats of the train_envs
-        "obs_var": None,  # Normlization stats of the train_envs
     }
     ########################################################################
     # TODO:
@@ -202,17 +209,12 @@ def save_model(
 
 
 
-
-
-
-
-
-
-
-
     ########################################################################
     #                           END OF YOUR CODE                           #
     ########################################################################
+
+    if hasattr(train_envs.unwrapped, "n_samples"):
+        save_dict["n_samples"] = train_envs.unwrapped.n_samples
     if save:
         torch.save(save_dict, path)
     # the return value is only used for testing the function
@@ -220,7 +222,7 @@ def save_model(
 
 
 def evaluate_agent(
-    envs: VectorEnv, agent: Agent, n_steps: int, device: str, seed: int | None = None
+    envs: VectorEnv, agent: nn.Module, n_steps: int, device: str, seed: int | None = None
 ) -> tuple[list[float], list[int]]:
     eval_obs, _ = envs.reset(seed=seed)
     ep_rewards = torch.zeros(envs.num_envs, device=device)
@@ -241,12 +243,12 @@ def evaluate_agent(
 
 
 class PPOTrainer:
-    def __init__(self, config: ConfigDict, wandb_log: bool = False):
+    def __init__(self, config: ConfigDict, wandb_log: bool = False, agent_cls: type[nn.Module] = Agent, **kwargs: dict[str, Any]):
         self.config = config
         self.wandb_log = wandb_log
 
         if wandb_log:
-            wandb.init(project="ARLDM-Exercise-PPO", config=None, reinit=True)
+            wandb.init(project=f"ARLDM-Exercise-PPO-{self.config.env_name}", config=None, reinit=True)
             self.config.update(wandb.config)
             if self.config.get("n_train_samples"):
                 self.config.n_steps = self.config.n_train_samples // self.config.n_envs
@@ -254,7 +256,7 @@ class PPOTrainer:
 
         set_seeds(self.config.seed)
         self.train_envs, self.eval_envs = make_envs(
-            self.config.n_envs, self.config.n_eval_envs, self.config.device
+            self.config.env_name, self.config.n_envs, self.config.n_eval_envs, self.config.device, **kwargs
         )
 
         self.config.batch_size = self.config.n_envs * self.config.n_steps  # 1024*16
@@ -265,7 +267,7 @@ class PPOTrainer:
         if self.config.n_iterations < 1:
             raise ValueError("Not enough iterations to train")
 
-        self.agent = Agent(self.train_envs).to(self.config.device)
+        self.agent = agent_cls(self.train_envs).to(self.config.device)
         self.optimizer = AdamW(self.agent.parameters(), lr=self.config.learning_rate, eps=1e-5)
 
         self.rewards = torch.zeros(
@@ -518,6 +520,7 @@ class PPOTrainer:
                 action, logprob, _, value = self.agent.action_and_value(obs)
 
             next_obs, reward, terminated, truncated, _ = self.train_envs.step(action)
+            # self.train_envs.render()
             done = terminated | truncated
             self.rewards += reward
             self.rewards[self.autoreset] = 0
@@ -631,7 +634,7 @@ class PPOTrainer:
         # Warm-up steps to initialize environment (required for jax)
         obs, _ = self.train_envs.reset(seed=self.config.seed)
         _ = self.train_envs.action_space.seed(self.config.seed)
-        for _ in range(1000):
+        for _ in range(100):
             self.train_envs.step(torch.tensor(self.train_envs.action_space.sample()))
 
         # Main training loop
@@ -687,7 +690,7 @@ class PPOTrainer:
                 self.agent,
                 self.optimizer,
                 self.train_envs,
-                Path(__file__).parent / "ppo_checkpoint_ex06.pt",
+                Path(__file__).parent / f"ppo_checkpoint_{self.config.env_name}.pt",
             )
 
         if self.wandb_log:
@@ -699,32 +702,35 @@ def PPOTester(
     ckpt_path: Optional[Union[str, Path]] = None,
     n_episodes: int = 10,
     render: bool = False,
+    agent_cls: type[nn.Module] = Agent,
+    env_name: str = "DroneReachPos-v0", 
+    test_env: VectorEnv = None,
+    **kwargs: dict[str, Any]
 ):
     set_seeds(seed)
     device = "cuda" if torch.cuda.is_available() else "cpu"
     env_device = "cpu"
     n_envs = 1
 
-    test_env = gymnasium.make_vec(
-        "DroneFigureEightTrajectory-v0",
-        freq=50,
-        num_envs=n_envs,
-        device=env_device,
-    )
-    test_env = FlattenJaxObservation(ZeroYaw(test_env))
-    test_env = gymnasium.wrappers.vector.jax_to_torch.JaxToTorch(test_env, device=device)
-
     # Load checkpoint
+    if ckpt_path is None:
+        Path(__file__).parent / f"ppo_checkpoint_{env_name}.pt"
     if isinstance(ckpt_path, str):
         ckpt_path = Path(ckpt_path)
     assert ckpt_path.exists(), f"Checkpoint file not found: {ckpt_path}"
     checkpoint = torch.load(ckpt_path, map_location=device, weights_only=False)
 
+    if test_env is None:
+        if not env_name == "DroneReachPos-v0":
+            kwargs["n_samples"] = checkpoint.get("n_samples", 1)
+        _, test_env = make_envs(env_name, n_envs, n_envs, env_device, **kwargs)
+    test_env = RecordData(test_env)
+
     # Create agent and load state
-    agent = Agent(test_env).to(device)
+    agent = agent_cls(test_env).to(device)
     agent.load_state_dict(checkpoint["model_state_dict"])
 
-    # Test for 10 episodes
+    # Test for n episodes
     episode_rewards = []
     episode_lengths = []
 
@@ -740,6 +746,7 @@ def PPOTester(
             obs, reward, terminated, truncated, info = test_env.step(action)
             if render:
                 test_env.render()
+
             done = terminated | truncated
             episode_reward += reward[0].item()
             steps += 1
@@ -747,11 +754,16 @@ def PPOTester(
         episode_rewards.append(episode_reward)
         episode_lengths.append(steps)
         print(f"Episode {episode + 1}: Reward = {episode_reward:.2f}, Length = {steps}")
+
+    test_env.plot_eval()
+    episode_rmse = test_env.calc_rmse()
+
     test_env.unwrapped.sim.close()
 
     print(
         f"\nAverage episode reward: {np.mean(episode_rewards):.2f} ± {np.std(episode_rewards):.2f}"
     )
     print(f"Average episode length: {np.mean(episode_lengths):.1f} ± {np.std(episode_lengths):.1f}")
+    print(f"Average episode standard tracking error: {episode_rmse:.3f} mm")
 
-    return np.mean(episode_rewards)
+    return np.mean(episode_rewards), episode_rmse

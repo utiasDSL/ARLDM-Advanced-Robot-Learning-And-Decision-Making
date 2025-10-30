@@ -2,8 +2,10 @@ import os
 import sys
 import unittest
 
+import gpytorch as gpy
 import numpy as np
 import torch
+from exercise04.gaussian_process import IndependentMultitaskSVGPModel as SVGPStudent
 from exercise04.gaussian_process import (
     MultiOutputGaussianProcess as MultiOutputGaussianProcessStudent,
 )
@@ -13,55 +15,120 @@ from exercise04.utils import CustomDataset, Normalizer, set_seed, train_test_spl
 module_path = sys.modules["exercise04"].__file__
 import_prefix = f"{os.path.dirname(module_path)}/" if module_path is not None else ""
 
+def init_gp(kernel="rbf", kernel_params= {"length_scale": 1.0, "nu": 1.5}, noise=1e-4):
+    return MultiOutputGaussianProcessStudent(kernel=kernel, kernel_params=kernel_params, noise=noise)
 
-class TestRBFKernel(unittest.TestCase):
+class BaseTest(unittest.TestCase):
     def setUp(self):
-        # Set a random seed for reproducibility
         set_seed(42)
-        self.L1 = 1.0
-        self.L2 = 2.0
-        self.gp = MultiOutputGaussianProcessStudent(length_scale=self.L1, noise=1e-4)
-        self.gp2 = MultiOutputGaussianProcessStudent(length_scale=self.L2, noise=1e-4)
+        self.gp = init_gp()
         self.X1 = np.random.rand(10, 1)
         self.X2 = np.random.rand(10, 1)
 
-    def test_rbf_kernel_shape(self):
-        rbf_kernel = self.gp.rbf_kernel(self.X1, self.X2)
+class TestKernels(BaseTest):
+    def kerneltest(self, kernel:str):
+        self.gp.set_kernel(kernel)
+        K = self.gp.kernel(self.X1, self.X2)
         self.assertEqual(
-            rbf_kernel.shape,
+            K.shape,
             (self.X1.shape[0], self.X2.shape[0]),
-            "RBF kernel shape is not correct.",
+            f"{kernel} kernel shape is not correct.",
         )
+        self.gp.set_kernel_params(length_scale=2.0)
+        K2 = self.gp.kernel(self.X1, self.X2)
+        self.assertFalse(
+            np.allclose(K, K2),
+            f"{kernel} kernels with different length scales should not be the same.",
+        )
+        
+    def test_rbf_kernel(self):
+        self.kerneltest("rbf")
 
+    def test_matern_kernel(self):
+        for nu in [0.5, 1.5, 2.5]:
+            self.gp.set_kernel_params(nu=nu)
+            self.gp.set_kernel("matern")
 
-class TestPredict(unittest.TestCase):
+        self.gp.set_kernel_params(nu=0.0)  # invalid nu
+        try:
+            self.gp.kernel(self.X1, self.X2)
+        except Exception:
+            pass
+        else:
+            self.fail("Matern kernel with invalid nu did not raise an error.")
+        
+class TestFit(BaseTest):
     def setUp(self):
-        set_seed(42)
-        self.gp = MultiOutputGaussianProcessStudent(length_scale=1.0, noise=1e-4)
-        self.X_train = np.random.rand(20, 2)
-        self.y_train = np.random.rand(20, 3)  # Multi-dimensional outputs
-        self.X_test = np.random.rand(5, 2)
-        self.gp.fit(self.X_train, self.y_train)
+        super().setUp()
+        self.X_train = np.random.rand(20, 5)
+        self.y_train = np.random.rand(20, 2)  # Multi-dimensional outputs
 
-    def test_mean_shape(self):
-        """Test if the mean prediction has the correct shape."""
-        mean = self.gp.predict(self.X_test)
+    def test_fit(self):
+        """Test if the fit method runs without errors and sets the training data."""
+        try:
+            self.gp.fit(self.X_train, self.y_train)
+        except Exception as e:
+            self.fail(f"Fit method failed with exception: {e}")
+        
+        self.assertIsNotNone(self.gp.K)
+        self.assertIsNotNone(self.gp.L)
+        self.assertIsNotNone(self.gp.alphas)
+        self.assertEqual(self.gp.K.shape, (self.X_train.shape[0], self.X_train.shape[0]))
+        self.assertEqual(self.gp.L.shape, (self.X_train.shape[0], self.X_train.shape[0]))
+        self.assertEqual(self.gp.alphas.shape, (self.X_train.shape[0], self.y_train.shape[1]))
+
+class TestPredict(BaseTest):
+    def setUp(self):
+        super().setUp()
+        self.X_train = np.random.rand(20, 5)
+        self.y_train = np.random.rand(20, 2)  # Multi-dimensional outputs
+        self.X_test = np.random.rand(10, 5)  
+        try:
+            self.gp.fit(self.X_train, self.y_train)
+        except Exception as e:
+            self.fail(f"Fit method failed with exception: {e}")
+
+
+    def test_mean(self):
+        try:
+            mean = self.gp.predict(self.X_test)
+        except Exception as e:
+            self.fail(f"Predict method failed with exception: {e}")
+
         self.assertEqual(
             mean.shape,
             (self.X_test.shape[0], self.y_train.shape[1]),
             "Mean prediction shape is incorrect.",
         )
 
-    def test_std_shape(self):
+    def test_std(self):
         """Test if the standard deviation prediction values are computed correctly."""
-        mean, std = self.gp.predict(self.X_test, return_std=True)
+        _, std = self.gp.predict(self.X_test, return_std=True)
         self.assertEqual(
             std.shape,
             (self.X_test.shape[0], self.y_train.shape[1]),
             "Standard deviation prediction shape is incorrect.",
         )
-        self.assertIsNotNone(std, "Standard deviation prediction is None.")
+        self.assertTrue(np.all(std >= 0), "Standard deviation contains negative values.")
 
+
+class TestInitSVGP(unittest.TestCase):
+    def setUp(self):
+        set_seed(42)
+        self.X_train = np.random.rand(20, 5)
+        self.y_train = np.random.rand(20, 2)
+
+    def test_init(self):
+        """Test if the SVGP model initializes correctly."""
+        try:
+            gp = SVGPStudent(X_train=self.X_train, num_tasks=self.y_train.shape[1], num_inducing_points=self.X_train.shape[0]//2)
+        except Exception as e:
+            self.fail(f"SVGP initialization failed with exception: {e}")
+
+        self.assertTrue(gp.var_distribution_type == gpy.variational.CholeskyVariationalDistribution, "Variational distribution is not of the correct type.")
+        self.assertTrue(gp.var_strategy_type == gpy.variational.IndependentMultitaskVariationalStrategy, "Variational strategy is not of the correct type.")
+        self.assertIsNotNone(gp.mean_module, "Mean module is not initialized.")
+        self.assertIsNotNone(gp.covar_module, "Covariance module is not initialized.")
 
 class TestCustomDatasetInit(unittest.TestCase):
     def setUp(self):
@@ -107,7 +174,7 @@ class TestNeuralNetworkInit(unittest.TestCase):
             )
         except Exception as e:
             self.fail(
-                f"Initialization of the Neural Netwrok class failed with exception: {e}"
+                f"Initialization of the Neural Network class failed with exception: {e}"
             )
         self.assertIsInstance(
             model, NeuralNetwork, "Model is not an instance of NeuralNetwork"
@@ -157,6 +224,27 @@ class TestTrainEpoch(unittest.TestCase):
         )
         self.trainer = RegressionTrainer(self.model)
 
+    def test_optimizer_scheduler_criterion(self):
+        """Test if the optimizer, scheduler, and criterion are set correctly."""
+        self.assertIsNotNone(self.trainer.optimizer, "Optimizer is not set.")
+        self.assertIsNotNone(self.trainer.criterion, "Criteration is not set.")
+
+        self.assertIsInstance(
+            self.trainer.optimizer,
+            torch.optim.Optimizer,
+            "Optimizer is not an instance of torch.optim.Optimizer",
+        )
+        self.assertIsInstance(
+            self.trainer.criterion,
+            torch.nn.modules.loss._Loss,
+            "Criterion is not an instance of torch.nn.modules.loss._Loss",
+        )
+
+        self.assertTrue(self.trainer.scheduler is None or
+            isinstance(self.trainer.scheduler,  torch.optim.lr_scheduler.LRScheduler),
+            "Scheduler is not an instance of torch.optim.lr_scheduler._LRScheduler or None",
+        )
+
     def test_train_epoch(self):
         """Test if the train_epoch method updates the model parameters and if the training loss decreases."""
         initial_params = [param.clone() for param in self.model.parameters()]
@@ -170,10 +258,10 @@ class TestTrainEpoch(unittest.TestCase):
                 torch.equal(initial, updated), "Model parameters did not update."
             )
         print(f"Loss at the start of the training: {loss:.3g}")
-        for _ in range(15):
+        for _ in range(20):
             current_loss = self.trainer.train_epoch(self.train_loader)
         print(f"Loss after 10 epochs: {current_loss:.3g}")
         self.assertLess(
-            current_loss, loss, "Loss did not decrease over first 10 epochs"
+            current_loss, loss, "Loss did not decrease over first 20 epochs"
         )
-        self.assertLess(current_loss, 0.1, "Loss is too high after 10 epochs")
+        self.assertLess(current_loss, 0.1, "Loss is too high after 20 epochs")

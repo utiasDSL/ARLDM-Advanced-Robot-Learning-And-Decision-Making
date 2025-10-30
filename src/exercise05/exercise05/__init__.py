@@ -1,5 +1,13 @@
-from .gp import GaussianProcess
-from .gpmpc import GPMPC
-from .run_gp_mpc import learn
+from .gp import ResidualGP, ResidualGPConfig, ResidualGPTrainingConfig
+from .gpmpc import GPMPC, GPMPCConfig
+from .mpc import MPC, MPCConfig
 
-__all__ = ["GPMPC", "learn", "GaussianProcess"]
+__all__ = [
+    "MPC",
+    "MPCConfig",
+    "GPMPC",
+    "GPMPCConfig",
+    "ResidualGP",
+    "ResidualGPConfig",
+    "ResidualGPTrainingConfig",
+]
