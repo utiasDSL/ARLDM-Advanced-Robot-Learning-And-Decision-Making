@@ -68,7 +68,7 @@ jobs:
 
       # Testing
       - name: Run pytest (Development)
-        if: ${{ github.repository == 'utiasDSL/ARLDM-Advanced-Robot-Learning-And-Decision-Making' && github.event.inputs.admin_key != secrets.ADMIN_KEY }}
+        if: ${{ github.repository == 'utiasDSL/ARLDM-Advanced-Robot-Learning-And-Decision-Making' }}
         working-directory: Advanced-Robot-Learning-and-Decision-Making-Programming-Exercises
         run: |
           if [[ "${{ github.event.inputs.admin_key }}" == "${{ secrets.ADMIN_KEY }}" ]]; then
@@ -91,7 +91,7 @@ jobs:
             "
 
       - name: Run pytest (Application)
-        if: ${{ github.repository == 'utiasDSL/ARLDM-Advanced-Robot-Learning-And-Decision-Making' && github.event.inputs.admin_key != secrets.ADMIN_KEY }}
+        if: ${{ github.repository == 'utiasDSL/ARLDM-Advanced-Robot-Learning-And-Decision-Making' }}
         working-directory: Advanced-Robot-Learning-and-Decision-Making-Programming-Exercises
         run: |
           if [[ "${{ github.event.inputs.admin_key }}" == "${{ secrets.ADMIN_KEY }}" ]]; then
