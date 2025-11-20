@@ -120,4 +120,4 @@ jobs:
           if [[ "${{ github.event.inputs.admin_key }}" != "${{ secrets.ADMIN_KEY }}" ]]; then
             exit 0
           fi
-          git push private public_sync-${{ github.ref_name }} --force
+          git push origin public_sync-${{ github.ref_name }} --force
