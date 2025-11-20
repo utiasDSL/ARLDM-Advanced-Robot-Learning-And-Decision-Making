@@ -118,7 +118,7 @@ class TestInitSVGP(unittest.TestCase):
         self.X_train = np.random.rand(20, 5)
         self.y_train = np.random.rand(20, 2)
 
-    def test_init(self):
+    def test_init_SVGP(self):
         """Test if the SVGP model initializes correctly."""
         try:
             gp = SVGPStudent(X_train=self.X_train, num_tasks=self.y_train.shape[1], num_inducing_points=self.X_train.shape[0]//2)
@@ -166,7 +166,7 @@ class TestNeuralNetworkInit(unittest.TestCase):
         output_path = os.path.join(import_prefix, "outputs")
         self.checkpoint_path = os.path.join(output_path, "nn_checkpoint_ex04.ckpt")
 
-    def test_init(self):
+    def test_init_NN(self):
         """Test if the NeuralNetwork class can be initialized with a checkpoint."""
         try:
             model = NeuralNetwork(

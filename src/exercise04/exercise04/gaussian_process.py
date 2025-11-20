@@ -231,6 +231,7 @@ class BaseGaussianProcess:
             idx = np.random.choice(X.shape[0], self.max_samples, replace=False)
             X = X[idx]
             y = y[idx]
+            self.X_train_subset = X # for prediction
         ########################################################################
         # Task 1.2
         # TODO:
@@ -281,10 +282,10 @@ class BaseGaussianProcess:
         #    returned by default.
         ########################################################################
         # Show relevant variables
-        L = self.L  
-        X_train = self.X_train 
-        alphas = self.alphas 
-        kernel = self.kernel 
+        L = self.L
+        X_train = self.X_train if not hasattr(self, "X_train_subset") else self.X_train_subset
+        alphas = self.alphas
+        kernel = self.kernel
         output_dim = self.output_dim
         mean, std = None, None  # Compute those
         ########################################################################

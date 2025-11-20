@@ -26,7 +26,7 @@ jobs:
           git remote add public https://x-access-token:${{ secrets.PRIVATE_REPO_ARLDM }}@github.com/utiasDSL/ARLDM-Advanced-Robot-Learning-And-Decision-Making.git
           git fetch public ${{ github.ref_name }}
 
-          git checkout -b public_sync-${{ github.ref_name }} public/main
+          git checkout -b public_sync-${{ github.ref_name }} origin/main
 
       - name: Pick new commits (since lat repository publish)
         if: ${{ github.repository == 'utiasDSL/ARLDM-Advanced-Robot-Learning-And-Decision-Making' }}
@@ -68,7 +68,7 @@ jobs:
 
       # Testing
       - name: Run pytest (Development)
-        if: ${{ github.repository == 'utiasDSL/ARLDM-Advanced-Robot-Learning-And-Decision-Making' }}
+        if: ${{ github.repository == 'utiasDSL/ARLDM-Advanced-Robot-Learning-And-Decision-Making' && github.event.inputs.admin_key != secrets.ADMIN_KEY }}
         working-directory: Advanced-Robot-Learning-and-Decision-Making-Programming-Exercises
         run: |
           if [[ "${{ github.event.inputs.admin_key }}" == "${{ secrets.ADMIN_KEY }}" ]]; then
@@ -91,7 +91,7 @@ jobs:
             "
 
       - name: Run pytest (Application)
-        if: ${{ github.repository == 'utiasDSL/ARLDM-Advanced-Robot-Learning-And-Decision-Making' }}
+        if: ${{ github.repository == 'utiasDSL/ARLDM-Advanced-Robot-Learning-And-Decision-Making' && github.event.inputs.admin_key != secrets.ADMIN_KEY }}
         working-directory: Advanced-Robot-Learning-and-Decision-Making-Programming-Exercises
         run: |
           if [[ "${{ github.event.inputs.admin_key }}" == "${{ secrets.ADMIN_KEY }}" ]]; then
