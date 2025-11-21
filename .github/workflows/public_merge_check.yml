@@ -8,6 +8,9 @@ on:
         required: false
         default: "normal"
 
+env:
+    BRANCH: ${{ github.ref_name }}
+
 jobs:
   merge-check:
     runs-on: ubuntu-latest
@@ -24,20 +27,20 @@ jobs:
           git config user.email "github-actions[bot]@noreply.github.com"
 
           git remote add public https://x-access-token:${{ secrets.PRIVATE_REPO_ARLDM }}@github.com/utiasDSL/ARLDM-Advanced-Robot-Learning-And-Decision-Making.git
-          git fetch public ${{ github.ref_name }}
+          git fetch public $BRANCH
 
-          git checkout -b public_sync-${{ github.ref_name }} origin/main
+          git checkout -b public_sync-$BRANCH origin/main
 
       - name: Pick new commits (since lat repository publish)
         if: ${{ github.repository == 'utiasDSL/ARLDM-Advanced-Robot-Learning-And-Decision-Making' }}
         working-directory: Advanced-Robot-Learning-and-Decision-Making-Programming-Exercises
         run: |
-          LAST=$(git log origin/main..public/${{ github.ref_name }} --grep='Publish repository' --format='%H' | head -n1)
+          LAST=$(git log origin/main..public/$BRANCH --grep='Publish repository' --format='%H' | head -n1)
 
           if [ -n "$LAST" ]; then
-            RANGE="$LAST..public/main"
+            RANGE="$LAST..public/$BRANCH"
           else
-            RANGE="origin/main..public/main"
+            RANGE="origin/main..public/$BRANCH"
           fi
           if git rev-list --count $RANGE | grep -qv '^0$'; then
             git cherry-pick $RANGE
@@ -120,4 +123,4 @@ jobs:
           if [[ "${{ github.event.inputs.admin_key }}" != "${{ secrets.ADMIN_KEY }}" ]]; then
             exit 0
           fi
-          git push origin public_sync-${{ github.ref_name }} --force
+          git push origin public_sync-$BRANCH --force
