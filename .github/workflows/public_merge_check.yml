@@ -4,9 +4,12 @@ on:
   workflow_dispatch:
     inputs:
       admin_key:
-        description: "Admin only:"
-        required: false
-        default: "normal"
+        type: choice
+        description: "Admins only (don't change this unless instructed):"
+        options:
+          - "test"
+          - "push"
+        default: "test"
 
 env:
     BRANCH: ${{ github.ref_name }}
@@ -74,7 +77,7 @@ jobs:
         if: ${{ github.repository == 'utiasDSL/ARLDM-Advanced-Robot-Learning-And-Decision-Making' }}
         working-directory: Advanced-Robot-Learning-and-Decision-Making-Programming-Exercises
         run: |
-          if [[ "${{ github.event.inputs.admin_key }}" == "${{ secrets.ADMIN_KEY }}" ]]; then
+          if [[ "${{ github.event.inputs.admin_key }}" == "push" ]]; then
             exit 0
           fi
           docker run --rm \
@@ -97,7 +100,7 @@ jobs:
         if: ${{ github.repository == 'utiasDSL/ARLDM-Advanced-Robot-Learning-And-Decision-Making' }}
         working-directory: Advanced-Robot-Learning-and-Decision-Making-Programming-Exercises
         run: |
-          if [[ "${{ github.event.inputs.admin_key }}" == "${{ secrets.ADMIN_KEY }}" ]]; then
+          if [[ "${{ github.event.inputs.admin_key }}" == "push" ]]; then
             exit 0
           fi
           docker run --rm \
@@ -120,7 +123,7 @@ jobs:
         if: ${{ github.repository == 'utiasDSL/ARLDM-Advanced-Robot-Learning-And-Decision-Making' }}
         working-directory: Advanced-Robot-Learning-and-Decision-Making-Programming-Exercises
         run: |
-          if [[ "${{ github.event.inputs.admin_key }}" != "${{ secrets.ADMIN_KEY }}" ]]; then
+          if [[ "${{ github.event.inputs.admin_key }}" != "push" ]]; then
             exit 0
           fi
           git push origin public_sync-$BRANCH --force
