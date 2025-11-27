@@ -15,7 +15,7 @@ from exercise04.utils import CustomDataset, Normalizer, set_seed, train_test_spl
 module_path = sys.modules["exercise04"].__file__
 import_prefix = f"{os.path.dirname(module_path)}/" if module_path is not None else ""
 
-def init_gp(kernel="rbf", kernel_params= {"length_scale": 1.0, "nu": 1.5}, noise=1e-4):
+def init_gp(kernel="se", kernel_params= {"length_scale": 1.0, "nu": 1.5}, noise=1e-4):
     return MultiOutputGaussianProcessStudent(kernel=kernel, kernel_params=kernel_params, noise=noise)
 
 class BaseTest(unittest.TestCase):
@@ -34,15 +34,19 @@ class TestKernels(BaseTest):
             (self.X1.shape[0], self.X2.shape[0]),
             f"{kernel} kernel shape is not correct.",
         )
-        self.gp.set_kernel_params(length_scale=2.0)
-        K2 = self.gp.kernel(self.X1, self.X2)
-        self.assertFalse(
-            np.allclose(K, K2),
-            f"{kernel} kernels with different length scales should not be the same.",
-        )
-        
-    def test_rbf_kernel(self):
-        self.kerneltest("rbf")
+        if kernel in ["se", "matern", "exp"]:
+            self.gp.set_kernel_params(length_scale=2.0)
+            K2 = self.gp.kernel(self.X1, self.X2)
+            self.assertFalse(
+                np.allclose(K, K2),
+                f"{kernel} kernels with different length scales should not be the same.",
+            )
+            
+    def test_se_kernel(self):
+        self.kerneltest("se")
+
+    def test_linear_kernel(self):
+        self.kerneltest("linear")
 
     def test_matern_kernel(self):
         for nu in [0.5, 1.5, 2.5]:

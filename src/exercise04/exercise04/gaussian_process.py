@@ -10,11 +10,11 @@ from torch.utils.data import DataLoader, TensorDataset
 
 
 class BaseGaussianProcess:
-    def __init__(self, kernel: str = "rbf", kernel_params: dict = None, noise: float = 1e-8, X_train=None, y_train=None, max_samples: Optional[int] = 1000):
+    def __init__(self, kernel: str = "se", kernel_params: dict = None, noise: float = 1e-8, X_train=None, y_train=None, max_samples: Optional[int] = 1000):
         """Basic Gaussian Process implementation with different kernel options. Parameters for kernels must be provided as a dictionary.
 
         Args:
-            kernel (str): Kernel type, options are "rbf", "linear", "poly", "matern", "exp".
+            kernel (str): Kernel type, options are "se", "linear", "poly", "matern", "exp".
             kernel_params (dict): Parameters for the chosen kernel.
             noise (float): Noise level for regularization.
             X_train (np.ndarray, optional): Training inputs. Defaults to None.
@@ -37,7 +37,7 @@ class BaseGaussianProcess:
         """Set the kernel and its parameters.
 
         Args:
-            kernel_type (str): Kernel type, options are "rbf", "linear", "poly", "matern", "exp".
+            kernel_type (str): Kernel type, options are "se", "linear", "poly", "matern", "exp".
             kernel_params (dict): Parameters for the chosen kernel.
         """
         if not hasattr(self, f"{kernel_type}_kernel"):
@@ -55,8 +55,8 @@ class BaseGaussianProcess:
         """
         self.kernel_params.update(kwargs)
 
-    def rbf_kernel(self, X1, X2):
-        """Radial Basis Function (RBF) kernel.
+    def se_kernel(self, X1, X2):
+        """Squared Exponential (SE) kernel.
 
         Inputs:
             X1, X2 (np.ndarray): Input arrays.
@@ -68,15 +68,14 @@ class BaseGaussianProcess:
         # Task 1.1
         # TODO:
         # 1. Define distance measure
-        # 2. Define rbf_kernel
+        # 2. Define se_kernel
         # Hints:
         # 1. Use cdist from scipy.spatial.distance to compute the distance
-        # 2. Don't forget the length_scale
-        # 3. IMPORTANT The rbf kernel is not equal to the exponential kernel.
-        # You can find the equation for the rbf kernel for instance in
-        # wikipedia.
-        # https://en.wikipedia.org/wiki/Radial_basis_function_kernel.
-        # The variance (σ) is also called length scale.
+        # 2. Use the squared Euclidean distance ("sqeuclidean")
+        # 3. Don't forget the length_scale
+        # You can find the equation for the SE kernel for instance in
+        # this page:
+        # https://www.cs.toronto.edu/~duvenaud/cookbook/.
         ########################################################################
         length_scale = self.kernel_params.get("length_scale", 1.0)
 
@@ -88,7 +87,7 @@ class BaseGaussianProcess:
         ########################################################################
         #                           END OF YOUR CODE
         ########################################################################
-        return rbf_kernel
+        return se_kernel
 
     def linear_kernel(self, X1, X2):
         """Linear kernel.
@@ -153,36 +152,21 @@ class BaseGaussianProcess:
         Returns:
             np.ndarray: Kernel matrix.
         """
-        ########################################################################
-        # Task 1.1
-        # TODO:
-        # 1. Define distance measure
-        # 2. Implement Matern kernel function
-        #    Use nu=0.5, 1.5, or 2.5 (see Wikipedia for formulas)
-        # Hints:
-        # 1. Use cdist from scipy.spatial.distance to compute the distance
-        ########################################################################
         length_scale = self.kernel_params.get("length_scale", 1.0)
         nu = self.kernel_params.get("nu", 1.5)
-        
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-        ########################################################################
-        #                           END OF YOUR CODE
-        ########################################################################
+        dists = cdist(X1, X2, "euclidean")
+        if nu == 0.5:
+            matern_kernel = np.exp(-dists / length_scale)
+        elif nu == 1.5:
+            sqrt3 = np.sqrt(3)
+            matern_kernel = (1 + sqrt3 * dists / length_scale) * np.exp(-sqrt3 * dists / length_scale)
+        elif nu == 2.5:
+            sqrt5 = np.sqrt(5)
+            matern_kernel = (1 + sqrt5 * dists / length_scale + 5 * dists**2 / (3 * length_scale**2)) * np.exp(
+                -sqrt5 * dists / length_scale
+            )
+        else:
+            raise ValueError("Unsupported nu for Matern kernel. Use 0.5, 1.5, or 2.5.")
         return matern_kernel
 
     def exp_kernel(self, X1, X2):
@@ -363,7 +347,8 @@ class IndependentMultitaskSVGPModel(gpy.models.ApproximateGP):
         # TODO:
         # 1. Define the mean and covariance modules
         # Hints:
-        # 1. Use ConstantMean and ScaleKernel with RBFKernel
+        # 1. Use ConstantMean and ScaleKernel with RBFKernel (squared exponential)
+        # https://docs.gpytorch.ai/en/stable/kernels.html#rbfkernel:~:text=(Optional)%20%E2%80%93-,RBFKernel,-class
         #######################################################################
         batch_shape = batch_shape # To show relevant parameter
         mean_module = None

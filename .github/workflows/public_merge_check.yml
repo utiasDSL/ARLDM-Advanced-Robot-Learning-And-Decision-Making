@@ -77,9 +77,6 @@ jobs:
         if: ${{ github.repository == 'utiasDSL/ARLDM-Advanced-Robot-Learning-And-Decision-Making' }}
         working-directory: Advanced-Robot-Learning-and-Decision-Making-Programming-Exercises
         run: |
-          if [[ "${{ github.event.inputs.admin_key }}" == "push" ]]; then
-            exit 0
-          fi
           docker run --rm \
             -v ${{ github.workspace }}/Advanced-Robot-Learning-and-Decision-Making-Programming-Exercises:/workspaces/Advanced-Robot-Learning-and-Decision-Making-Programming-Exercises \
             -w /workspaces/Advanced-Robot-Learning-and-Decision-Making-Programming-Exercises \
@@ -100,9 +97,6 @@ jobs:
         if: ${{ github.repository == 'utiasDSL/ARLDM-Advanced-Robot-Learning-And-Decision-Making' }}
         working-directory: Advanced-Robot-Learning-and-Decision-Making-Programming-Exercises
         run: |
-          if [[ "${{ github.event.inputs.admin_key }}" == "push" ]]; then
-            exit 0
-          fi
           docker run --rm \
             -v ${{ github.workspace }}/Advanced-Robot-Learning-and-Decision-Making-Programming-Exercises:/workspaces/Advanced-Robot-Learning-and-Decision-Making-Programming-Exercises \
             -w /workspaces/Advanced-Robot-Learning-and-Decision-Making-Programming-Exercises \
