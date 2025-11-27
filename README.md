@@ -1,16 +1,18 @@
-# Control for Robotics - Advanced Programming Exercises
+# Control for Robotics <br> <small><small>Advanced Programming Exercises</small></small>
 
 
 ### **Book**: Control for Robotics - From Optimal Control to Decision Making
 
 ### **Course**: ARLDM - Advanced Robot Learning and Decision Making (TUM 0CIT433037)
 
-> 🚀 Welcome! To start the exercises succesfully, read *all of the following* carefully.
+> 🚀 Welcome! To start the exercises read the following instructions carefully.
 
-> **Students taking the course for Uni must use the code and additional instructions provided directly in the course!**
+> ❗ **Students taking the course for Uni must use the code provided directly through course and ARTEMIS!**
 
 ![headshot](headshot.png)
 
+## 🚀 Introduction
+ToDo
 
 ## ⚙️ Preliminaries and Setup
 
@@ -105,13 +107,6 @@ python -c "import torch; print('CUDA available:', torch.cuda.is_available())"
    - **Do not change function's arguments or return values.**
    - **Do not install any additional dependencies.**
    - :warning: **Do not post your solutions or part of the solutions publicly available during or after the course.** This also includes course-internal communication. Please strictly adhere to this rule. Not adhering to this rule will result in exemption from the course.
-
-
-## Common Issues
-- Common failure codes for display forwarding  include `glfw error` and `Display not found`. Try to run `xhost +local:docker` on the host. Additionally, make sure you followed all steps mentioned above.
-- If building docker container fails at `RUN apt-get update`, make sure your host systems time is set correct: https://askubuntu.com/questions/1511514/docker-build-fails-at-run-apt-update-error-failed-to-solve-process-bin-sh
-- `wsl --install` stuck at 0.0%: Try [this](https://github.com/microsoft/WSL/issues/9390#issuecomment-1579398805).
-- If VSCode Test Discovery is stuck during test discovery without any error: [Downgrade your python extension to 2024.20.0](https://github.com/microsoft/vscode-python/issues/24656#issue-2757930549). You can also still run the test cases from a terminal in the Docker container by running the command `pytest`.
 ## Common Issues
 - Common failure codes for display forwarding  include `glfw error` and `Display not found`. Try to run `xhost +local:docker` on the host. Additionally, make sure you followed all steps mentioned above.
 - If building docker container fails at `RUN apt-get update`, make sure your host systems time is set correct: https://askubuntu.com/questions/1511514/docker-build-fails-at-run-apt-update-error-failed-to-solve-process-bin-sh
