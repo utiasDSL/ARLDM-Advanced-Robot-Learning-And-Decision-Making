@@ -1,0 +1,148 @@
+FROM nvidia/cuda:12.6.3-devel-ubuntu22.04
+
+# Prevent interactive prompts during package installation
+ENV DEBIAN_FRONTEND=noninteractive
+
+ARG DEVICE_TYPE=CPU
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3.11 \
+    python3-pip \
+    python3.11-venv \
+    python3.11-dev \
+    bash-completion \
+    build-essential \
+    curl \
+    cmake \
+    git \
+    ssh \
+    sudo \
+    mesa-utils \
+    wget \
+    htop \
+    tmux \
+    nano \
+    && rm -rf /var/lib/apt/lists/* && apt-get clean
+
+# Create symbolic links for python
+RUN ln -sf /usr/bin/python3.11 /usr/bin/python \
+    && ln -sf /usr/bin/python3.11 /usr/bin/python3
+
+# Create non-root user
+ARG USERNAME=vscode
+ARG USER_UID=1000
+ARG USER_GID=$USER_UID
+
+RUN groupadd --gid $USER_GID $USERNAME \
+    && useradd --uid $USER_UID --gid $USER_GID -m $USERNAME
+
+# Set environment variables for CUDA
+ENV PATH="/usr/local/cuda-12.0/bin:${PATH}"
+ENV LD_LIBRARY_PATH="/usr/local/cuda-12.0/lib64:${LD_LIBRARY_PATH}"
+
+ENV NVIDIA_VISIBLE_DEVICES ${NVIDIA_VISIBLE_DEVICES:-all}
+ENV NVIDIA_DRIVER_CAPABILITIES ${NVIDIA_DRIVER_CAPABILITIES:+$NVIDIA_DRIVER_CAPABILITIES,}graphics
+
+# Create and set proper permissions for workspace directory
+RUN mkdir -p /workspace && \
+    chmod -R 755 /workspace && \
+    chown -R $USERNAME:$USERNAME /workspace
+
+# Install Acados 
+# Acados Part I: 
+# Set the acados version.
+ARG TERA_RENDERER_VERSION=v0.0.34
+# Set the acados installation directory, which must be consistent with the acados_template path set in pyproject.toml.
+ARG ACADOS_INSTALL_DIR=/opt
+
+# Acados Part II:
+# Install acados dependencies.
+# See: https://docs.acados.org/installation/#id1
+# Clone acados repository and its submodules.
+WORKDIR $ACADOS_INSTALL_DIR
+RUN git config --global http.postBuffer 524288000
+# NOTE: instead of blindly copying from GitHub, we should use a specific release tag. Use one of the following commands:
+# RUN git clone -b v0.4.3 --single-branch --depth=1 https://github.com/acados/acados.git
+# RUN git clone https://github.com/acados/acados.git && cd acados && git fetch --tags && git checkout tags/v0.4.3
+RUN git clone --branch v0.5.0 --depth 1 https://github.com/acados/acados.git $ACADOS_INSTALL_DIR/acados
+WORKDIR $ACADOS_INSTALL_DIR/acados
+RUN git submodule update --recursive --init
+
+
+
+# Change ownership of the acados directory
+RUN chown -R $USERNAME:$USERNAME $ACADOS_INSTALL_DIR/acados
+
+# Create virtual environment with proper permissions
+ENV VIRTUAL_ENV=/home/vscode/venv
+RUN python -m venv $VIRTUAL_ENV && \
+    chown -R $USERNAME:$USERNAME $VIRTUAL_ENV
+ENV PATH="$VIRTUAL_ENV/bin:$PATH"
+
+
+# Switch to non-root user
+USER $USERNAME
+
+# Install development tools
+RUN pip install --no-cache-dir ipykernel termcolor
+# required for crazyflow
+RUN pip install --upgrade pip setuptools wheel
+
+
+# Acados Part III: 
+# Build and install acados.
+# See: https://docs.acados.org/installation/#cmake-recommended
+#      https://github.com/acados/acados/blob/v0.3.6/CMakeLists.txt#L80-L94
+RUN rm -rf build \
+    && mkdir build \
+    && cd build \
+    && cmake -DACADOS_WITH_QPOASES=ON .. \
+    && make install -j4
+
+# To successfully render C code templates, download the tera_renderer binaries and make them executable.
+# See: https://docs.acados.org/python_interface/index.html#installation
+RUN cd bin \
+    && wget https://github.com/acados/tera_renderer/releases/download/${TERA_RENDERER_VERSION}/t_renderer-${TERA_RENDERER_VERSION}-linux \
+    && mv t_renderer-${TERA_RENDERER_VERSION}-linux t_renderer \
+    && chmod +x t_renderer
+
+# Acados Part IV: 
+# Set acados environment variables.
+# See: https://docs.acados.org/python_interface/index.html#installation
+ENV ACADOS_INSTALL_DIR=$ACADOS_INSTALL_DIR
+ENV LD_LIBRARY_PATH="$ACADOS_INSTALL_DIR/acados/lib"
+ENV ACADOS_SOURCE_DIR="$ACADOS_INSTALL_DIR/acados"
+RUN pip install --no-cache-dir -e ${ACADOS_SOURCE_DIR}/interfaces/acados_template
+
+
+# Create a temporary directory for installation with proper permissions and install crazyflow
+WORKDIR /tmp/install
+
+# Copy pyproject.toml
+COPY --chown=$USERNAME:$USERNAME pyproject.toml .
+
+# Install dependencies as non-root user
+# Enable cpu-only and gpu versions of torch
+ENV PIP_EXTRA_INDEX_URL="https://download.pytorch.org/whl/cu126 https://download.pytorch.org/whl/cpu"
+
+# prevent OOM: https://docs.jax.dev/en/latest/gpu_memory_allocation.html#common-causes-of-oom-failures
+ENV XLA_PYTHON_CLIENT_PREALLOCATE=false
+
+RUN if [ "$DEVICE_TYPE" = "GPU" ]; then \
+        pip install --no-cache-dir .[test,gpu,pin]; \
+    else \
+        pip install --no-cache-dir .[test,cpu,pin]; \
+    fi
+
+# The below PYTHONPATHS are only required for the development repository, and for GitHub CI
+# TODO move to .env file
+ENV PYTHONPATH "${PYTHONPATH}:/workspaces/Advanced-Robot-Learning-and-Decision-Making-Programming-Exercises/src/exercise01"
+ENV PYTHONPATH "${PYTHONPATH}:/workspaces/Advanced-Robot-Learning-and-Decision-Making-Programming-Exercises/src/exercise02"
+ENV PYTHONPATH "${PYTHONPATH}:/workspaces/Advanced-Robot-Learning-and-Decision-Making-Programming-Exercises/src/exercise03"
+ENV PYTHONPATH "${PYTHONPATH}:/workspaces/Advanced-Robot-Learning-and-Decision-Making-Programming-Exercises/src/exercise04"
+ENV PYTHONPATH "${PYTHONPATH}:/workspaces/Advanced-Robot-Learning-and-Decision-Making-Programming-Exercises/src/exercise05"
+ENV PYTHONPATH "${PYTHONPATH}:/workspaces/Advanced-Robot-Learning-and-Decision-Making-Programming-Exercises/src/exercise06"
+
+# Set final working directory
+WORKDIR /workspace

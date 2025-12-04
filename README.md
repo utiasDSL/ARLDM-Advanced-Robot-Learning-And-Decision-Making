@@ -9,7 +9,8 @@
 
 > ❗ **Students taking the course for Uni must use the code provided directly through course and ARTEMIS!**
 
-![headshot](headshot.png)
+![example](example_1.gif)
+![example](example_2.gif)
 
 ## 🚀 Introduction
 ToDo
