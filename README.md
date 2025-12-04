@@ -1,9 +1,11 @@
-# Control for Robotics <br> <small><small>Advanced Programming Exercises</small></small>
+*Authors*: The code is written by [Oliver Hausdörfer](https://oliver.hausdoerfer.de/), [Martin Schuck](https://github.com/amacati), [Luca Worbis](https://github.com/cryxil), [Yi Lu](https://github.com/yilutum), [Yufei Hua](https://github.com/yufei4hua), and [Timo Class](https://github.com/clsti). For details please refer to CONTRIBUTORS.md.
+
+# Control for Robotics - From Optimal Control to Decision Making <br> <small><small>Advanced Programming Exercises</small></small>
 
 
-### **Book**: Control for Robotics - From Optimal Control to Decision Making
+### **[Book](https://utiasdsl.github.io/cfr/)**: Control for Robotics - From Optimal Control to Decision Making
 
-### **Course**: ARLDM - Advanced Robot Learning and Decision Making (TUM 0CIT433037)
+### **[Course](https://www.ce.cit.tum.de/lsy/teaching/advanced-robot-learning-and-decision-making/)**: ARLDM - Advanced Robot Learning and Decision Making (TUM 0CIT433037)
 
 > 🚀 Welcome! To start the exercises read the following instructions carefully.
 
@@ -13,7 +15,13 @@
 ![example](example_2.gif)
 
 ## 🚀 Introduction
-ToDo
+This code accompanies the drone case study from our book [_Control for Robotics: From Optimal Control to Reinforcement Learning_](https://utiasdsl.github.io/cfr/). We also use this code base as a foundation for our Advanced Course [_Advanced Robot Learning and Decision Making_](https://www.ce.cit.tum.de/lsy/teaching/advanced-robot-learning-and-decision-making/) at TUM (0CIT433037).
+
+The code is designed as programming exercises, where you are guided to implement your own LQR, ILQR, MPC, GP-MPC, Model Learning, and DRL controllers. The code includes test cases, to test your implementations locally.
+
+The tasks evolve around controlling a simulated drone - from reaching a simple goal pose to follow complex trajectories.
+
+# Using the Programming Exercises
 
 ## ⚙️ Preliminaries and Setup
 
@@ -32,7 +40,7 @@ We will use:
 
 If they all sound completely new to you do not panic. We will require a very basic use of most of them, but it is a good time to start learning these tools since they are all widely adopted in modern robotics.
 
-## 👨‍💻 Setting up the exercise environment
+## 👨‍💻 Setting up the exercises
 The following are the usual steps involved in setting up VS Code Devcontainers. One special feature is that we render simulations directly on the container host's display. Such display forwarding is a common failure case, is the reason why the exercise container does not work on MacOS for the moment, and explains all of the more special instructions below.
 
 ### Linux (recommended)
