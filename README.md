@@ -1,9 +1,9 @@
-*Authors*: The code is written by [Oliver Hausdörfer](https://oliver.hausdoerfer.de/), [Martin Schuck](https://github.com/amacati), [Luca Worbis](https://github.com/cryxil), [Yi Lu](https://github.com/yilutum), [Yufei Hua](https://github.com/yufei4hua), and [Timo Class](https://github.com/clsti). For details please refer to CONTRIBUTORS.md.
+<sup>This code is written by [Oliver Hausdörfer](https://oliver.hausdoerfer.de/), [Martin Schuck](https://github.com/amacati), [Luca Worbis](https://github.com/cryxil), [Yi Lu](https://github.com/yilutum), [Yufei Hua](https://github.com/yufei4hua), and [Timo Class](https://github.com/clsti). For details please refer to [CONTRIBUTORS.md](CONTRIBUTORS.md).<sup>
 
-# Control for Robotics - From Optimal Control to Decision Making <br> <small><small>Advanced Programming Exercises</small></small>
+# Control for Robotics - From Optimal Control to Decision Making <small><small>Advanced Programming Exercises</small></small>
 
 
-### **[Book](https://utiasdsl.github.io/cfr/)**: Control for Robotics - From Optimal Control to Decision Making
+### **[Book](https://utiasdsl.github.io/cfr/)**: Control for Robotics - From Optimal Control to Decision Making (Angela P. Schoellig, SiQi Zhou)
 
 ### **[Course](https://www.ce.cit.tum.de/lsy/teaching/advanced-robot-learning-and-decision-making/)**: ARLDM - Advanced Robot Learning and Decision Making (TUM 0CIT433037)
 
@@ -15,9 +15,16 @@
 ![example](example_2.gif)
 
 ## 🚀 Introduction
-This code accompanies the drone case study from our book [_Control for Robotics: From Optimal Control to Reinforcement Learning_](https://utiasdsl.github.io/cfr/). We also use this code base as a foundation for our Advanced Course [_Advanced Robot Learning and Decision Making_](https://www.ce.cit.tum.de/lsy/teaching/advanced-robot-learning-and-decision-making/) at TUM (0CIT433037).
+This code accompanies the drone case study from our book [Control for Robotics: From Optimal Control to Reinforcement Learning](https://utiasdsl.github.io/cfr/). We also use this code base as a foundation for our Advanced Course [Advanced Robot Learning and Decision Making](https://www.ce.cit.tum.de/lsy/teaching/advanced-robot-learning-and-decision-making/) at TUM (0CIT433037).
 
-The code is designed as programming exercises, where you are guided to implement your own LQR, ILQR, MPC, GP-MPC, Model Learning, and DRL controllers. The code includes test cases, to test your implementations locally.
+The code is designed as programming exercises, where you are guided to implement your own controllers:
+- Exercise 01: Introduction to code and frameworks
+- Exercise 02: LQR, ILQR
+- Exercise 03: MPC
+- Exercise 04: GP-MPC
+- Exercise 05: Model Learning
+- Exercise 06: DRL
+The code includes test cases, to test your implementations locally.
 
 The tasks evolve around controlling a simulated drone - from reaching a simple goal pose to follow complex trajectories.
 
