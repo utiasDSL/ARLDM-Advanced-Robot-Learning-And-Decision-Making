@@ -11,8 +11,11 @@
 
 > ❗ **Students taking the course for Uni must use the code provided directly through course and ARTEMIS!**
 
-![example](example_1.gif)
-![example](example_2.gif)
+<p align="center">
+  <img src="example_1.gif" width="30%" />
+  <img src="example_2.gif" width="30%" />
+  <img src="example_3.gif" width="30%" />
+</p>
 
 ## 🚀 Introduction
 This code accompanies the drone case study from our book [Control for Robotics: From Optimal Control to Reinforcement Learning](https://utiasdsl.github.io/cfr/). We also use this code base as a foundation for our Advanced Course [Advanced Robot Learning and Decision Making](https://www.ce.cit.tum.de/lsy/teaching/advanced-robot-learning-and-decision-making/) at TUM (0CIT433037).
