@@ -1,0 +1,3 @@
+########## Sim parameters ##########
+Ts: 0.002            # sampling time [s]  
+integrator_type: 'IRK'
