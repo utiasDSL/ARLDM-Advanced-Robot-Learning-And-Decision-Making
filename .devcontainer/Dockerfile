@@ -1,2 +1,2 @@
-FROM olivertum/arldm_student:cpu-13
-# FROM olivertum/arldm_student:gpu-13
+FROM teachinglsy/arldm_student:cpu-1
+# FROM teachinglsy/arldm_student:gpu-1

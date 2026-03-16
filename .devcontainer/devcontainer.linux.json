@@ -5,6 +5,7 @@
         "context": ".."
     },
     "postStartCommand": "echo 'Development container started!'",
+    "postCreateCommand": "pip install -e .",
     "customizations": {
         "vscode": {
             "extensions": [
@@ -37,7 +38,7 @@
                 ], // hide unrequired python interpreters, so that the right one gets selected for jupyter https://github.com/microsoft/vscode/issues/130946#issuecomment-1899389049
                 "python.testing.pytestEnabled": true, // test framework
                 "python.testing.pytestArgs": [
-                    "--ignore=exercise"
+                    "--ignore=public_repo"
                 ],
                 "python.testing.unittestEnabled": false, // test framework
                 "python.testing.nosetestsEnabled": false, // test framework

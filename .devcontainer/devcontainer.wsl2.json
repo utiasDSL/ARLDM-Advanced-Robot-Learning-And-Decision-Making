@@ -5,6 +5,7 @@
         "context": ".."
     },
     "postStartCommand": "echo 'Development container started!'",
+    "postCreateCommand": "pip install -e .",
     "customizations": {
         "vscode": {
             "extensions": [

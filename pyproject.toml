@@ -22,7 +22,7 @@ dependencies = [
     "munch",
     "scikit-learn==1.6.1",
     "scikit-optimize==0.10.2",
-    "wandb==0.19.7",
+    "wandb==0.24.0",
     "matplotlib",
     "termcolor",
     "gpytorch==1.14",
@@ -52,13 +52,14 @@ pin = [
 ]
 
 [tool.setuptools.packages]
-find = {}
+find = { where = ["src"] }
 
 [tool.pytest.ini_options]
+pythonpath = ["src"]
 python_files = ["test_*.py", "testStudent_*.py", ]
 addopts = [
-    "--ignore=./solution",
-    "--ignore=./exercise"
+    "--ignore=./solution_repo",
+    "--ignore=./public_repo",
 ]
 
 [tool.ruff]

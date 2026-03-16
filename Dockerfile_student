@@ -121,6 +121,8 @@ WORKDIR /tmp/install
 
 # Copy pyproject.toml
 COPY --chown=$USERNAME:$USERNAME pyproject.toml .
+# Create a dummy src to satisfy pyproject.toml requirements
+RUN mkdir src
 
 # Install dependencies as non-root user
 # Enable cpu-only and gpu versions of torch
@@ -134,15 +136,6 @@ RUN if [ "$DEVICE_TYPE" = "GPU" ]; then \
     else \
         pip install --no-cache-dir .[test,cpu,pin]; \
     fi
-
-# The below PYTHONPATHS are only required for the development repository, and for GitHub CI
-# TODO move to .env file
-ENV PYTHONPATH "${PYTHONPATH}:/workspaces/Advanced-Robot-Learning-and-Decision-Making-Programming-Exercises/src/exercise01"
-ENV PYTHONPATH "${PYTHONPATH}:/workspaces/Advanced-Robot-Learning-and-Decision-Making-Programming-Exercises/src/exercise02"
-ENV PYTHONPATH "${PYTHONPATH}:/workspaces/Advanced-Robot-Learning-and-Decision-Making-Programming-Exercises/src/exercise03"
-ENV PYTHONPATH "${PYTHONPATH}:/workspaces/Advanced-Robot-Learning-and-Decision-Making-Programming-Exercises/src/exercise04"
-ENV PYTHONPATH "${PYTHONPATH}:/workspaces/Advanced-Robot-Learning-and-Decision-Making-Programming-Exercises/src/exercise05"
-ENV PYTHONPATH "${PYTHONPATH}:/workspaces/Advanced-Robot-Learning-and-Decision-Making-Programming-Exercises/src/exercise06"
 
 # Set final working directory
 WORKDIR /workspace

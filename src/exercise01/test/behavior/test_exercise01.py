@@ -5,7 +5,7 @@ from exercise01.return_true import return_true
 
 class TestReturnTrue(unittest.TestCase):
     expected_return_value = True
-    
+
     def setUp(self):
         """Executed prior to each test to initialize required variables."""
         self.expected_return_value = True

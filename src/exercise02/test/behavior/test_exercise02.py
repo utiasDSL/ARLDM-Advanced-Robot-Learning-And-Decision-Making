@@ -5,26 +5,19 @@ from pathlib import Path
 
 import gymnasium
 import numpy as np
-from exercise02.ilqr import ILQR
-from exercise02.lqr import LQR
-from exercise02.utils import discretize_linear_system, obs_to_state
 from numpy.testing import assert_array_almost_equal
 from scipy.spatial.transform import Rotation as R  #
 
-env = gymnasium.make_vec(
-    "DroneReachPos-v0",
-    num_envs=1,
-    freq=500,
-    device="cpu",
-)
+from exercise02.ilqr import ILQR
+from exercise02.lqr import LQR
+from exercise02.utils import discretize_linear_system, obs_to_state
+
+env = gymnasium.make_vec("DroneReachPos-v0", num_envs=1, freq=500, device="cpu")
 
 
 def load_test_data():
     """Load precomputed test data from a pickle file."""
-    filepath = os.path.join(
-        Path(__file__).parent,
-        "exercise02_testdata.pkl",
-    )
+    filepath = os.path.join(Path(__file__).parent, "exercise02_testdata.pkl")
     with open(filepath, "rb") as f:
         data = pickle.load(f)
     return data
@@ -51,7 +44,6 @@ class TestObsToState(unittest.TestCase):
             np.allclose(self.state[0:6], self.state_expected[0:6]),
             "Position and euler angles are incorrectly mapped.",
         )
-        
 
     def test_euler_angle(self):
         euler = self.state[3:6]
@@ -100,16 +92,12 @@ class TestComputeLQRGain(unittest.TestCase):
     def test_type_of_gain(self):
         gain = self.lqr_controller.gain
         type_exp = type(self.gain_expected)
-        self.assertIsInstance(
-            gain, type_exp, f"gain of lqr is not of type {type_exp}"
-        )
-        
+        self.assertIsInstance(gain, type_exp, f"gain of lqr is not of type {type_exp}")
+
     def test_shape_of_gain(self):
         gain = self.lqr_controller.gain
         shape_exp = self.gain_expected.shape
-        assert gain.shape == shape_exp, (
-            f"Shape of gain: expected {shape_exp}, got {gain.shape}"
-        )
+        assert gain.shape == shape_exp, f"Shape of gain: expected {shape_exp}, got {gain.shape}"
         # assert_array_almost_equal(gain, self.gain_expected, err_msg='The gain was miscalculated.')
 
 
@@ -121,15 +109,15 @@ class TestLQRStepControl(unittest.TestCase):
         inputs = self.test_data["step_control_lqr"]["inputs"]
         self.current_state = inputs["obs"]
         self.goal = inputs["goal"]
-        self.control_input_exp = self.test_data["step_control_lqr"]["outputs"]["control_input_expected"]
+        self.control_input_exp = self.test_data["step_control_lqr"]["outputs"][
+            "control_input_expected"
+        ]
 
     def test_control_input_type(self):
         control_input = self.lqr_controller.step_control(self.current_state, self.goal)
         type_exp = type(self.control_input_exp)
         dtype_exp = self.control_input_exp.dtype
-        self.assertIsInstance(
-            control_input, type_exp, f"control_input is not {type_exp}"
-        )
+        self.assertIsInstance(control_input, type_exp, f"control_input is not {type_exp}")
         self.assertEqual(
             control_input.dtype, dtype_exp, f"control_input is not of type {dtype_exp}"
         )
@@ -143,7 +131,7 @@ class TestLQRStepControl(unittest.TestCase):
 
     def test_control_input_clip(self):
         control_input = self.lqr_controller.step_control(self.current_state, self.goal)
-        collective_thrust_expected = self.control_input_exp[0,0]
+        collective_thrust_expected = self.control_input_exp[0, 0]
         self.assertLessEqual(
             control_input[0, 0],
             collective_thrust_expected,
@@ -203,18 +191,12 @@ class TestILQR(unittest.TestCase):
         self.assertIsInstance(Qm_N, np.ndarray, "Qm_N should be a NumPy array")
 
         # shape
+        self.assertEqual(q_N.shape, (1, 1), f"q_N shape incorrect: expected (1,1), got {q_N.shape}")
         self.assertEqual(
-            q_N.shape, (1, 1), f"q_N shape incorrect: expected (1,1), got {q_N.shape}"
+            Qv_N.shape, (12, 1), f"Qv_N shape incorrect: expected (12,1), got {Qv_N.shape}"
         )
         self.assertEqual(
-            Qv_N.shape,
-            (12, 1),
-            f"Qv_N shape incorrect: expected (12,1), got {Qv_N.shape}",
-        )
-        self.assertEqual(
-            Qm_N.shape,
-            (12, 12),
-            f"Qm_N shape incorrect: expected (12,12), got {Qm_N.shape}",
+            Qm_N.shape, (12, 12), f"Qm_N shape incorrect: expected (12,12), got {Qm_N.shape}"
         )
 
     def test_stage_cost_quad_output(self):
@@ -232,24 +214,14 @@ class TestILQR(unittest.TestCase):
         self.assertIsInstance(Pm, np.ndarray, "Pm should be a NumPy array")
 
         # shape
-        self.assertEqual(
-            q.shape, (1, 1), f"q shape incorrect: expected (1,1), got {q.shape}"
-        )
-        self.assertEqual(
-            Qv.shape, (12, 1), f"Qv shape incorrect: expected (12,1), got {Qv.shape}"
-        )
+        self.assertEqual(q.shape, (1, 1), f"q shape incorrect: expected (1,1), got {q.shape}")
+        self.assertEqual(Qv.shape, (12, 1), f"Qv shape incorrect: expected (12,1), got {Qv.shape}")
         self.assertEqual(
             Qm.shape, (12, 12), f"Qm shape incorrect: expected (12,12), got {Qm.shape}"
         )
-        self.assertEqual(
-            Rv.shape, (4, 1), f"Rv shape incorrect: expected (4,1), got {Rv.shape}"
-        )
-        self.assertEqual(
-            Rm.shape, (4, 4), f"Rm shape incorrect: expected (4,4), got {Rm.shape}"
-        )
-        self.assertEqual(
-            Pm.shape, (4, 12), f"Pm shape incorrect: expected (4,12), got {Pm.shape}"
-        )
+        self.assertEqual(Rv.shape, (4, 1), f"Rv shape incorrect: expected (4,1), got {Rv.shape}")
+        self.assertEqual(Rm.shape, (4, 4), f"Rm shape incorrect: expected (4,4), got {Rm.shape}")
+        self.assertEqual(Pm.shape, (4, 12), f"Pm shape incorrect: expected (4,12), got {Pm.shape}")
 
     def test_update_policy_return_shape(self):
         np.random.seed(42)
@@ -272,21 +244,13 @@ class TestILQR(unittest.TestCase):
         )
 
         self.assertEqual(
-            theta_ff.shape,
-            (4,),
-            f"q shape incorrect: expected (4,), got {theta_ff.shape}",
+            theta_ff.shape, (4,), f"q shape incorrect: expected (4,), got {theta_ff.shape}"
         )
         self.assertEqual(
-            theta_fb.shape,
-            (4, 12),
-            f"Qv shape incorrect: expected (4, 12), got {theta_fb.shape}",
+            theta_fb.shape, (4, 12), f"Qv shape incorrect: expected (4, 12), got {theta_fb.shape}"
         )
-        self.assertEqual(
-            s.shape, (1, 1), f"Qm shape incorrect: expected (1, 1), got {s.shape}"
-        )
-        self.assertEqual(
-            Sv.shape, (12, 1), f"Rv shape incorrect: expected (12, 1), got {Sv.shape}"
-        )
+        self.assertEqual(s.shape, (1, 1), f"Qm shape incorrect: expected (1, 1), got {s.shape}")
+        self.assertEqual(Sv.shape, (12, 1), f"Rv shape incorrect: expected (12, 1), got {Sv.shape}")
         self.assertEqual(
             Sm.shape, (12, 12), f"Rm shape incorrect: expected (12, 12), got {Sm.shape}"
         )

@@ -10,6 +10,7 @@ import yaml
 from acados_template import AcadosOcp  # type: ignore
 from crazyflow.constants import GRAVITY, MASS
 from crazyflow.sim.symbolic import symbolic_from_sim
+
 from exercise03.linear_mpc import LinearModelPredictiveController
 from exercise03.mpc_utils import (
     create_linear_prediction_model,
@@ -25,12 +26,7 @@ from exercise03.ocp_setup import create_ocp_linear, create_ocp_nonlinear
 module_path = sys.modules["exercise03"].__file__
 import_prefix = f"{os.path.dirname(module_path)}/" if module_path is not None else ""
 
-env = gymnasium.make_vec(
-    "DroneReachPos-v0",
-    num_envs=1,
-    freq=500,
-    device="cpu",
-)
+env = gymnasium.make_vec("DroneReachPos-v0", num_envs=1, freq=500, device="cpu")
 
 symbolic_model = symbolic_from_sim(env.sim)
 
@@ -46,37 +42,27 @@ class TestCreateLinearPredictionModel(unittest.TestCase):
         self.assertIsInstance(self.model.x, ca.MX, "`model.x` is not of type CasADi MX")
 
     def test_linear_mpc_x_shape(self):
-        self.assertEqual(
-            self.model.x.shape, (12, 1), "`model.x` does not have shape (12,1)"
-        )
+        self.assertEqual(self.model.x.shape, (12, 1), "`model.x` does not have shape (12,1)")
 
     def test_linear_mpc_x_is_symbolic(self):
         """Test that x contains only symbolic variables (no mathematical operations)."""
         for i in range(self.model.x.shape[0]):
-            self.assertTrue(
-                self.model.x[i].is_symbolic(), f"model.x[{i}] is not purely symbolic"
-            )
+            self.assertTrue(self.model.x[i].is_symbolic(), f"model.x[{i}] is not purely symbolic")
 
     def test_linear_mpc_u_type(self):
         self.assertIsInstance(self.model.u, ca.MX, "`model.u` is not of type CasADi MX")
 
     def test_linear_mpc_u_shape(self):
-        self.assertEqual(
-            self.model.u.shape, (4, 1), "`model.u` does not have shape (4,1)"
-        )
+        self.assertEqual(self.model.u.shape, (4, 1), "`model.u` does not have shape (4,1)")
 
     def test_linear_mpc_u_is_symbolic(self):
         """Test that u contains only symbolic variables (no mathematical operations)."""
         for i in range(self.model.u.shape[0]):
-            self.assertTrue(
-                self.model.u[i].is_symbolic(), f"model.u[{i}] is not purely symbolic"
-            )
+            self.assertTrue(self.model.u[i].is_symbolic(), f"model.u[{i}] is not purely symbolic")
 
     def test_linear_mpc_disc_dyn_expr_type(self):
         self.assertIsInstance(
-            self.model.disc_dyn_expr,
-            ca.MX,
-            "`model.disc_dyn_expr` is not a CasADi MX expression",
+            self.model.disc_dyn_expr, ca.MX, "`model.disc_dyn_expr` is not a CasADi MX expression"
         )
 
     def test_linear_mpc_disc_dyn_expr_shape(self):
@@ -93,8 +79,7 @@ class TestCreateLinearPredictionModel(unittest.TestCase):
             for i in range(self.model.disc_dyn_expr.shape[0])
         )
         self.assertFalse(
-            has_operations,
-            "`model.disc_dyn_expr` does not contain mathematical operations",
+            has_operations, "`model.disc_dyn_expr` does not contain mathematical operations"
         )
 
 
@@ -107,41 +92,29 @@ class TestCreateNonlinearPredictionModel(unittest.TestCase):
         self.assertIsInstance(self.model.x, ca.MX, "`model.x` is not of type CasADi MX")
 
     def test_nonlinear_mpc_x_shape(self):
-        self.assertEqual(
-            self.model.x.shape, (12, 1), "`model.x` does not have shape (12,1)"
-        )
+        self.assertEqual(self.model.x.shape, (12, 1), "`model.x` does not have shape (12,1)")
 
     def test_nonlinear_mpc_x_is_symbolic(self):
         """Test that x contains only symbolic variables (no mathematical operations)."""
         for i in range(self.model.x.shape[0]):
-            self.assertTrue(
-                self.model.x[i].is_symbolic(), f"model.x[{i}] is not purely symbolic"
-            )
+            self.assertTrue(self.model.x[i].is_symbolic(), f"model.x[{i}] is not purely symbolic")
 
     def test_nonlinear_mpc_u_type(self):
         self.assertIsInstance(self.model.u, ca.MX, "`model.u` is not of type CasADi MX")
 
     def test_nonlinear_mpc_u_shape(self):
-        self.assertEqual(
-            self.model.u.shape, (4, 1), "`model.u` does not have shape (4,1)"
-        )
+        self.assertEqual(self.model.u.shape, (4, 1), "`model.u` does not have shape (4,1)")
 
     def test_nonlinear_mpc_u_is_symbolic(self):
         """Test that u contains only symbolic variables (no mathematical operations)."""
         for i in range(self.model.u.shape[0]):
-            self.assertTrue(
-                self.model.u[i].is_symbolic(), f"model.u[{i}] is not purely symbolic"
-            )
+            self.assertTrue(self.model.u[i].is_symbolic(), f"model.u[{i}] is not purely symbolic")
 
     def test_nonlinear_mpc_xdot_type(self):
-        self.assertIsInstance(
-            self.model.xdot, ca.MX, "`model.xdot` is not of type CasADi MX"
-        )
+        self.assertIsInstance(self.model.xdot, ca.MX, "`model.xdot` is not of type CasADi MX")
 
     def test_nonlinear_mpc_xdot_shape(self):
-        self.assertEqual(
-            self.model.xdot.shape, (12, 1), "`model.xdot` does not have shape (12,1)"
-        )
+        self.assertEqual(self.model.xdot.shape, (12, 1), "`model.xdot` does not have shape (12,1)")
 
     def test_nonlinear_mpc_xdot_is_symbolic(self):
         """Test that xdot contains only symbolic variables (no mathematical operations)."""
@@ -156,66 +129,50 @@ class TestCreateNonlinearPredictionModel(unittest.TestCase):
 
     def test_nonlinear_mpc_f_expl_expr_type(self):
         self.assertIsInstance(
-            self.model.f_expl_expr,
-            ca.MX,
-            "`model.f_expl_expr` is not a CasADi MX expression",
+            self.model.f_expl_expr, ca.MX, "`model.f_expl_expr` is not a CasADi MX expression"
         )
 
     def test_nonlinear_mpc_f_expl_expr_shape(self):
         self.assertEqual(
-            self.model.f_expl_expr.shape,
-            (12, 1),
-            "`model.f_expl_expr` does not have shape (12,1)",
+            self.model.f_expl_expr.shape, (12, 1), "`model.f_expl_expr` does not have shape (12,1)"
         )
 
     def test_nonlinear_mpc_f_expl_expr_has_operations(self):
         """Test that f_expl_expr contains at least one mathematical operation."""
         has_operations = all(
-            self.model.f_expl_expr[i].is_symbolic()
-            for i in range(self.model.f_expl_expr.shape[0])
+            self.model.f_expl_expr[i].is_symbolic() for i in range(self.model.f_expl_expr.shape[0])
         )
         self.assertFalse(
-            has_operations,
-            "`model.f_expl_expr` does not contain mathematical operations",
+            has_operations, "`model.f_expl_expr` does not contain mathematical operations"
         )
 
     def test_nonlinear_mpc_f_impl_expr_type(self):
         self.assertIsInstance(
-            self.model.f_impl_expr,
-            ca.MX,
-            "`model.f_impl_expr` is not a CasADi MX expression",
+            self.model.f_impl_expr, ca.MX, "`model.f_impl_expr` is not a CasADi MX expression"
         )
 
     def test_nonlinear_mpc_f_impl_expr_shape(self):
         self.assertEqual(
-            self.model.f_impl_expr.shape,
-            (12, 1),
-            "`model.f_impl_expr` does not have shape (12,1)",
+            self.model.f_impl_expr.shape, (12, 1), "`model.f_impl_expr` does not have shape (12,1)"
         )
 
     def test_nonlinear_mpc_f_impl_expr_has_operations(self):
         """Test that f_impl_expr contains at least one mathematical operation."""
         has_operations = all(
-            self.model.f_impl_expr[i].is_symbolic()
-            for i in range(self.model.f_impl_expr.shape[0])
+            self.model.f_impl_expr[i].is_symbolic() for i in range(self.model.f_impl_expr.shape[0])
         )
         self.assertFalse(
-            has_operations,
-            "`model.f_impl_expr` does not contain mathematical operations",
+            has_operations, "`model.f_impl_expr` does not contain mathematical operations"
         )
 
     def test_nonlinear_mpc_cost_y_expr_type(self):
         self.assertIsInstance(
-            self.model.cost_y_expr,
-            ca.MX,
-            "`model.cost_y_expr` is not of type CasADi MX",
+            self.model.cost_y_expr, ca.MX, "`model.cost_y_expr` is not of type CasADi MX"
         )
 
     def test_nonlinear_mpc_cost_y_expr_shape(self):
         self.assertEqual(
-            self.model.cost_y_expr.shape,
-            (16, 1),
-            "`model.cost_y_expr` does not have shape (16,1)",
+            self.model.cost_y_expr.shape, (16, 1), "`model.cost_y_expr` does not have shape (16,1)"
         )
 
     def test_nonlinear_mpc_cost_y_expr_is_symbolic(self):
@@ -228,9 +185,7 @@ class TestCreateNonlinearPredictionModel(unittest.TestCase):
 
     def test_nonlinear_mpc_cost_y_expr_e_type(self):
         self.assertIsInstance(
-            self.model.cost_y_expr_e,
-            ca.MX,
-            "`model.cost_y_expr_e` is not of type CasADi MX",
+            self.model.cost_y_expr_e, ca.MX, "`model.cost_y_expr_e` is not of type CasADi MX"
         )
 
     def test_nonlinear_mpc_cost_y_expr_e_shape(self):
@@ -260,47 +215,35 @@ class TestCreateOCPConstraints(unittest.TestCase):
 
     def test_mpc_x0_type(self):
         self.assertIsInstance(
-            self.ocp.constraints.x0,
-            np.ndarray,
-            "`constraints.x0` is not of type `np.ndarray`",
+            self.ocp.constraints.x0, np.ndarray, "`constraints.x0` is not of type `np.ndarray`"
         )
 
     def test_mpc_x0_shape(self):
         nx = symbolic_model.nx
         self.assertEqual(
-            self.ocp.constraints.x0.shape,
-            (nx,),
-            f"`constraints.x0` does not have shape ({nx},)",
+            self.ocp.constraints.x0.shape, (nx,), f"`constraints.x0` does not have shape ({nx},)"
         )
 
     def test_mpc_lbu_type(self):
         self.assertIsInstance(
-            self.ocp.constraints.lbu,
-            np.ndarray,
-            "`constraints.lbu` is not of type `np.ndarray`",
+            self.ocp.constraints.lbu, np.ndarray, "`constraints.lbu` is not of type `np.ndarray`"
         )
 
     def test_mpc_lbu_shape(self):
         nu = symbolic_model.nu
         self.assertEqual(
-            self.ocp.constraints.lbu.shape,
-            (nu,),
-            f"`constraints.lbu` does not have shape ({nu},)",
+            self.ocp.constraints.lbu.shape, (nu,), f"`constraints.lbu` does not have shape ({nu},)"
         )
 
     def test_mpc_ubu_type(self):
         self.assertIsInstance(
-            self.ocp.constraints.ubu,
-            np.ndarray,
-            "`constraints.ubu` is not of type `np.ndarray`",
+            self.ocp.constraints.ubu, np.ndarray, "`constraints.ubu` is not of type `np.ndarray`"
         )
 
     def test_mpc_ubu_shape(self):
         nu = symbolic_model.nu
         self.assertEqual(
-            self.ocp.constraints.ubu.shape,
-            (nu,),
-            f"`constraints.ubu` does not have shape ({nu},)",
+            self.ocp.constraints.ubu.shape, (nu,), f"`constraints.ubu` does not have shape ({nu},)"
         )
 
     def test_mpc_idxbu_type(self):
@@ -333,15 +276,11 @@ class TestCreateOCPCostsLinear(unittest.TestCase):
         self.n = self.nx + self.nu
 
     def test_linear_mpc_cost_type(self):
-        self.assertEqual(
-            self.ocp.cost.cost_type, "LINEAR_LS", "`cost.cost_type` isn't 'LINEAR_LS'"
-        )
+        self.assertEqual(self.ocp.cost.cost_type, "LINEAR_LS", "`cost.cost_type` isn't 'LINEAR_LS'")
 
     def test_linear_mpc_cost_type_e(self):
         self.assertEqual(
-            self.ocp.cost.cost_type_e,
-            "LINEAR_LS",
-            "`cost.cost_type_e` isn't 'LINEAR_LS'",
+            self.ocp.cost.cost_type_e, "LINEAR_LS", "`cost.cost_type_e` isn't 'LINEAR_LS'"
         )
 
     def test_linear_mpc_Vx_shape(self):
@@ -381,9 +320,7 @@ class TestCreateOCPCostsLinear(unittest.TestCase):
 
     def test_linear_mpc_yref_shape(self):
         self.assertEqual(
-            self.ocp.cost.yref.shape,
-            (self.n,),
-            f"`cost.yref` does not have shape {(self.n,)}",
+            self.ocp.cost.yref.shape, (self.n,), f"`cost.yref` does not have shape {(self.n,)}"
         )
 
     def test_linear_mpc_yref_e_shape(self):
@@ -408,16 +345,12 @@ class TestCreateOCPCostsNonlinear(unittest.TestCase):
 
     def test_nonlinear_mpc_cost_type(self):
         self.assertEqual(
-            self.ocp.cost.cost_type,
-            "NONLINEAR_LS",
-            "`cost.cost_type` isn't 'NONLINEAR_LS'",
+            self.ocp.cost.cost_type, "NONLINEAR_LS", "`cost.cost_type` isn't 'NONLINEAR_LS'"
         )
 
     def test_nonlinear_mpc_cost_type_e(self):
         self.assertEqual(
-            self.ocp.cost.cost_type_e,
-            "NONLINEAR_LS",
-            "`cost.cost_type_e` isn't 'NONLINEAR_LS'",
+            self.ocp.cost.cost_type_e, "NONLINEAR_LS", "`cost.cost_type_e` isn't 'NONLINEAR_LS'"
         )
 
     def test_nonlinear_mpc_W_shape(self):
@@ -436,9 +369,7 @@ class TestCreateOCPCostsNonlinear(unittest.TestCase):
 
     def test_nonlinear_mpc_yref_shape(self):
         self.assertEqual(
-            self.ocp.cost.yref.shape,
-            (self.n,),
-            f"`cost.yref` does not have shape {(self.n,)}",
+            self.ocp.cost.yref.shape, (self.n,), f"`cost.yref` does not have shape {(self.n,)}"
         )
 
     def test_nonlinear_mpc_yref_e_shape(self):
@@ -470,9 +401,7 @@ class TestCreateOCPSolver(unittest.TestCase):
 
     def test_mpc_tf(self):
         ans = self.options["Ts"] * self.options["n_pred"]
-        self.assertEqual(
-            self.ocp.solver_options.tf, ans, "`solver_options.tf` incorrect"
-        )
+        self.assertEqual(self.ocp.solver_options.tf, ans, "`solver_options.tf` incorrect")
 
     def test_mpc_nlp_solver_type(self):
         self.assertEqual(
@@ -559,9 +488,7 @@ class TestCreateOCPLinear(unittest.TestCase):
         self.ocp, self.ocp_solver = create_ocp_linear(symbolic_model, config)
 
     def test_linear_mpc_ocp_constraints(self):
-        self.assertNotEqual(
-            self.ocp.constraints.lbu.shape, (0,), "Constraints are not assigned."
-        )
+        self.assertNotEqual(self.ocp.constraints.lbu.shape, (0,), "Constraints are not assigned.")
 
     def test_linear_mpc_ocp_cost(self):
         nx = symbolic_model.nx
@@ -577,9 +504,7 @@ class TestCreateOCPNonlinear(unittest.TestCase):
         self.ocp, self.ocp_solver = create_ocp_nonlinear(symbolic_model, config)
 
     def test_nonlinear_mpc_ocp_constraints(self):
-        self.assertNotEqual(
-            self.ocp.constraints.lbu.shape, (0,), "Constraints are not assigned."
-        )
+        self.assertNotEqual(self.ocp.constraints.lbu.shape, (0,), "Constraints are not assigned.")
 
     def test_nonlinear_mpc_ocp_cost(self):
         nx = symbolic_model.nx
@@ -645,21 +570,15 @@ class TestStepControlLinear(unittest.TestCase):
 
     def test_linear_mpc_yref(self):
         try:
-            self.mock_solver.set.assert_any_call(
-                unittest.mock.ANY, "yref", unittest.mock.ANY
-            )
+            self.mock_solver.set.assert_any_call(unittest.mock.ANY, "yref", unittest.mock.ANY)
         except AssertionError:
             raise AssertionError("Have you set 'yref' correctly?")
 
     def test_linear_mpc_warm_start(self):
         try:
-            self.mock_solver.set.assert_any_call(
-                unittest.mock.ANY, "u", unittest.mock.ANY
-            )
+            self.mock_solver.set.assert_any_call(unittest.mock.ANY, "u", unittest.mock.ANY)
         except AssertionError:
-            raise AssertionError(
-                "Have you set 'u' as the previous solution to use warm start"
-            )
+            raise AssertionError("Have you set 'u' as the previous solution to use warm start")
 
     def test_linear_mpc_extract_u(self):
         try:
@@ -671,14 +590,10 @@ class TestStepControlLinear(unittest.TestCase):
 
     def test_linear_mpc_store_predictions(self):
         self.assertEqual(
-            self.u_pred_after.shape,
-            self.u_pred_pre.shape,
-            "Don't change the shape of 'u_pred'.",
+            self.u_pred_after.shape, self.u_pred_pre.shape, "Don't change the shape of 'u_pred'."
         )
         self.assertEqual(
-            self.x_pred_after.shape,
-            self.x_pred_pre.shape,
-            "Don't change the shape of 'x_pred'.",
+            self.x_pred_after.shape, self.x_pred_pre.shape, "Don't change the shape of 'x_pred'."
         )
         self.assertNotEqual(
             np.sum(self.u_pred_after),
@@ -693,12 +608,8 @@ class TestStepControlLinear(unittest.TestCase):
     def test_linear_mpc_action_type(self):
         print(type(self.action))
         print(self.action.shape)
-        self.assertIsInstance(
-            self.action, np.ndarray, "control_input is not a NumPy array"
-        )
-        self.assertEqual(
-            self.action.dtype, np.float32, "control_input is not of type float32"
-        )
+        self.assertIsInstance(self.action, np.ndarray, "control_input is not a NumPy array")
+        self.assertEqual(self.action.dtype, np.float32, "control_input is not of type float32")
 
     def test_linear_mpc_action_shape(self):
         self.assertEqual(
@@ -765,21 +676,15 @@ class TestStepControlNonlinear(unittest.TestCase):
 
     def test_nonlinear_mpc_yref(self):
         try:
-            self.mock_solver.set.assert_any_call(
-                unittest.mock.ANY, "yref", unittest.mock.ANY
-            )
+            self.mock_solver.set.assert_any_call(unittest.mock.ANY, "yref", unittest.mock.ANY)
         except AssertionError:
             raise AssertionError("Have you set 'yref' correctly?")
 
     def test_nonlinear_mpc_warm_start(self):
         try:
-            self.mock_solver.set.assert_any_call(
-                unittest.mock.ANY, "u", unittest.mock.ANY
-            )
+            self.mock_solver.set.assert_any_call(unittest.mock.ANY, "u", unittest.mock.ANY)
         except AssertionError:
-            raise AssertionError(
-                "Have you set 'u' as the previous solution to use warm start"
-            )
+            raise AssertionError("Have you set 'u' as the previous solution to use warm start")
 
     def test_nonlinear_mpc_extract_u(self):
         try:
@@ -791,14 +696,10 @@ class TestStepControlNonlinear(unittest.TestCase):
 
     def test_nonlinear_mpc_store_predictions(self):
         self.assertEqual(
-            self.u_pred_after.shape,
-            self.u_pred_pre.shape,
-            "Don't change the shape of 'u_pred'.",
+            self.u_pred_after.shape, self.u_pred_pre.shape, "Don't change the shape of 'u_pred'."
         )
         self.assertEqual(
-            self.x_pred_after.shape,
-            self.x_pred_pre.shape,
-            "Don't change the shape of 'x_pred'.",
+            self.x_pred_after.shape, self.x_pred_pre.shape, "Don't change the shape of 'x_pred'."
         )
         self.assertNotEqual(
             np.sum(self.u_pred_after),
@@ -813,12 +714,8 @@ class TestStepControlNonlinear(unittest.TestCase):
     def test_nonlinear_mpc_action_type(self):
         print(type(self.action))
         print(self.action.shape)
-        self.assertIsInstance(
-            self.action, np.ndarray, "control_input is not a NumPy array"
-        )
-        self.assertEqual(
-            self.action.dtype, np.float32, "control_input is not of type float32"
-        )
+        self.assertIsInstance(self.action, np.ndarray, "control_input is not a NumPy array")
+        self.assertEqual(self.action.dtype, np.float32, "control_input is not of type float32")
 
     def test_nonlinear_mpc_action_shape(self):
         self.assertEqual(
